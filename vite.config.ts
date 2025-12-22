@@ -13,8 +13,6 @@ export default defineConfig(({ mode }) => {
       plugins: [react()],
       define: {
         'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(geminiKey),
-        'import.meta.env.GEMINI_API_KEY': JSON.stringify(geminiKey),
-        'import.meta.env.API_KEY': JSON.stringify(geminiKey),
         'process.env.API_KEY': JSON.stringify(geminiKey),
         'process.env.GEMINI_API_KEY': JSON.stringify(geminiKey)
       },
