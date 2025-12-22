@@ -5,7 +5,7 @@ import { GEMINI_KEY_ENV_ORDER } from './envKeys';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
-    const geminiKey = GEMINI_KEY_ENV_ORDER.map(key => env[key]).find(Boolean) || '';
+    const geminiKey = GEMINI_KEY_ENV_ORDER.map(key => env[key]).find(value => value?.trim()) || '';
     return {
       server: {
         port: 3000,

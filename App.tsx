@@ -240,7 +240,7 @@ export default function App() {
 
   const handleSendMessage = async (target: TargetAgent, options: AgentOptions) => {
     if (!inputValue.trim() && !options.image) return;
-    const apiKey = import.meta.env.RESOLVED_GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
+    const apiKey = import.meta.env.RESOLVED_GEMINI_API_KEY;
     if (!apiKey) {
       const keyList = GEMINI_KEY_ENV_ORDER.join(' or ');
       setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: `Missing Gemini API key. Add ${keyList} to your .env.local file.`, timestamp: new Date() }]);
