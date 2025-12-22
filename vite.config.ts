@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [react()],
       define: {
+        // Surface the same resolved key through both import.meta and process fallbacks used in the app.
         'import.meta.env.GEMINI_API_KEY': JSON.stringify(geminiApiKey),
         'process.env.API_KEY': JSON.stringify(geminiApiKey),
         'process.env.GEMINI_API_KEY': JSON.stringify(geminiApiKey)
