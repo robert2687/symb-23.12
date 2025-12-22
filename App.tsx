@@ -28,6 +28,7 @@ import { ChatInterface } from './components/ChatInterface';
 import { TasksView } from './components/TasksView';
 import { AuthModal } from './components/AuthModal';
 import { SettingsModal } from './components/SettingsModal';
+import { GEMINI_KEY_ENV_ORDER } from './envKeys';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
@@ -66,8 +67,6 @@ const EXAMPLE_PROMPTS = [
   "Design a dark-themed analytics dashboard",
   "Make a SaaS landing page"
 ];
-
-const SUPPORTED_GEMINI_ENV_KEYS = ['VITE_GEMINI_API_KEY', 'GEMINI_API_KEY', 'API_KEY'] as const;
 
 const EmptyState = ({ onStart, onExampleClick, theme }: { onStart: () => void, onExampleClick: (text: string) => void, theme: Theme }) => (
   <div className={`h-full flex flex-col items-center justify-center text-center p-6 relative overflow-hidden ${theme === 'dark' ? 'bg-[#1e1e2e]' : 'bg-gray-50'}`}>
@@ -243,7 +242,7 @@ export default function App() {
     if (!inputValue.trim() && !options.image) return;
     const apiKey = import.meta.env.RESOLVED_GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
     if (!apiKey) {
-      const keyList = SUPPORTED_GEMINI_ENV_KEYS.join(' or ');
+      const keyList = GEMINI_KEY_ENV_ORDER.join(' or ');
       setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: `Missing Gemini API key. Add ${keyList} to your .env.local file.`, timestamp: new Date() }]);
       setIsProcessing(false);
       return;
