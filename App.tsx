@@ -243,7 +243,7 @@ export default function App() {
       || import.meta.env.GEMINI_API_KEY 
       || import.meta.env.API_KEY;
     if (!apiKey) {
-      setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: "Missing Gemini API key. Add VITE_GEMINI_API_KEY to your .env.local file.", timestamp: new Date() }]);
+      setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: "Missing Gemini API key. Add VITE_GEMINI_API_KEY (or GEMINI_API_KEY/API_KEY) to your .env.local file.", timestamp: new Date() }]);
       setIsProcessing(false);
       return;
     }
