@@ -239,7 +239,15 @@ export default function App() {
 
   const handleSendMessage = async (target: TargetAgent, options: AgentOptions) => {
     if (!inputValue.trim() && !options.image) return;
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY 
+      || import.meta.env.GEMINI_API_KEY 
+      || (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY || process.env?.API_KEY : undefined);
+    if (!apiKey) {
+      setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: "Missing Gemini API key. Add VITE_GEMINI_API_KEY to your .env.local file.", timestamp: new Date() }]);
+      setIsProcessing(false);
+      return;
+    }
+    const ai = new GoogleGenAI({ apiKey });
     const userMsg: ChatMessage = { 
       id: generateId(), 
       sender: 'user', 
