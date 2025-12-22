@@ -67,6 +67,8 @@ const EXAMPLE_PROMPTS = [
   "Make a SaaS landing page"
 ];
 
+const SUPPORTED_GEMINI_ENV_KEYS = ['VITE_GEMINI_API_KEY', 'GEMINI_API_KEY', 'API_KEY'] as const;
+
 const EmptyState = ({ onStart, onExampleClick, theme }: { onStart: () => void, onExampleClick: (text: string) => void, theme: Theme }) => (
   <div className={`h-full flex flex-col items-center justify-center text-center p-6 relative overflow-hidden ${theme === 'dark' ? 'bg-[#1e1e2e]' : 'bg-gray-50'}`}>
     <div className={`absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] ${theme === 'dark' ? 'from-indigo-900/20 via-[#1e1e2e] to-[#1e1e2e]' : 'from-indigo-200/40 via-gray-50 to-gray-50'}`} />
@@ -239,9 +241,10 @@ export default function App() {
 
   const handleSendMessage = async (target: TargetAgent, options: AgentOptions) => {
     if (!inputValue.trim() && !options.image) return;
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    const apiKey = import.meta.env.RESOLVED_GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
     if (!apiKey) {
-      setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: "Missing Gemini API key. Add VITE_GEMINI_API_KEY (or GEMINI_API_KEY/API_KEY) to your .env.local file.", timestamp: new Date() }]);
+      const keyList = SUPPORTED_GEMINI_ENV_KEYS.join(' or ');
+      setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: `Missing Gemini API key. Add ${keyList} to your .env.local file.`, timestamp: new Date() }]);
       setIsProcessing(false);
       return;
     }
