@@ -241,7 +241,7 @@ export default function App() {
     if (!inputValue.trim() && !options.image) return;
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY 
       || import.meta.env.GEMINI_API_KEY 
-      || (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY || process.env?.API_KEY : undefined);
+      || import.meta.env.API_KEY;
     if (!apiKey) {
       setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: "Missing Gemini API key. Add VITE_GEMINI_API_KEY to your .env.local file.", timestamp: new Date() }]);
       setIsProcessing(false);
