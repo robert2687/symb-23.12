@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
-    // Support both GEMINI_API_KEY and API_KEY env names for compatibility with different deployment setups.
+    // Prefer GEMINI_API_KEY but fall back to API_KEY for compatibility across deployment setups.
     const geminiApiKey = env.GEMINI_API_KEY || env.API_KEY;
     return {
       server: {
@@ -14,8 +14,8 @@ export default defineConfig(({ mode }) => {
       plugins: [react()],
       define: {
         'import.meta.env.GEMINI_API_KEY': JSON.stringify(geminiApiKey),
-        'process.env.API_KEY': JSON.stringify(env.API_KEY || env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.API_KEY)
+        'process.env.API_KEY': JSON.stringify(geminiApiKey),
+        'process.env.GEMINI_API_KEY': JSON.stringify(geminiApiKey)
       },
       resolve: {
         alias: {
