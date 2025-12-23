@@ -4,8 +4,8 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { GEMINI_KEY_ENV_ORDER } from './envKeys';
 
-// SHA-256 hashes of known compromised Gemini API keys. Add hashes here to block them at build time;
-// keeping the list in-source makes it easy to audit and update alongside other build config.
+// SHA-256 hashes of known compromised Gemini API keys (hashing avoids storing raw keys in source).
+// Add hashes here to block them at build time; keeping the list in-source makes it easy to audit.
 const BLOCKED_GEMINI_KEY_HASHES = new Set([
   'c83922dee0374346dc5f5f7a16de494ad136470a05658dcb72a4bc4b279503fb', // leaked key, do not use
 ]);
@@ -15,7 +15,7 @@ const sanitizeGeminiKey = (rawKey?: string) => {
   if (!sanitized) return '';
   const hashed = createHash('sha256').update(sanitized).digest('hex');
   if (BLOCKED_GEMINI_KEY_HASHES.has(hashed)) {
-    console.warn('Blocked Gemini API key detected. Generate a new key in Google AI Studio and set VITE_GEMINI_API_KEY (or GEMINI_API_KEY/API_KEY).');
+    console.warn('Blocked Gemini API key detected. Generate a new key at https://aistudio.google.com and set VITE_GEMINI_API_KEY (or GEMINI_API_KEY/API_KEY).');
     return '';
   }
   return sanitized;
