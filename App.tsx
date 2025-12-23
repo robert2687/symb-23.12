@@ -108,10 +108,22 @@ const unwrapGeminiError = (error: Partial<GeminiErrorPayload>): GeminiInnerError
   return { code, message, status };
 };
 
+const parseGeminiErrorString = (raw: string): GeminiInnerError | null => {
+  try {
+    return unwrapGeminiError(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+};
+
 const formatAgentError = (error: unknown) => {
   if (!error) return '';
   if (error instanceof Error) return error.message;
-  if (typeof error === 'string') return error;
+  if (typeof error === 'string') {
+    const parsed = parseGeminiErrorString(error);
+    if (parsed) return formatAgentError(parsed);
+    return error;
+  }
   if (typeof error === 'object' && error !== null) {
     const structured = error as Partial<GeminiErrorPayload>;
     const nested = unwrapGeminiError(structured);
@@ -120,10 +132,16 @@ const formatAgentError = (error: unknown) => {
     const code = nested.code;
     const status = nested.status;
     const normalized = message ? message.toLowerCase() : '';
+    const mentionsApiKey = normalized.includes('api key');
+    const isMissingApiKey = mentionsApiKey && (normalized.includes('not found') || normalized.includes('missing') || normalized.includes('invalid'));
+    const isInvalidArgumentMissingKey = (status === 'INVALID_ARGUMENT' || code === 400) && mentionsApiKey;
+    if (isMissingApiKey || isInvalidArgumentMissingKey) {
+      const keyList = GEMINI_KEY_ENV_ORDER.join(' or ');
+      return `Gemini API key missing or invalid. Add ${keyList} to your .env.local file and restart the app.`;
+    }
     // Known Gemini responses for leaked keys include PERMISSION_DENIED 403 with "Your API key was reported as leaked".
     // Update the patterns below if SDK messaging changes.
     const hasLeakedMessage = normalized.includes('reported as leaked');
-    const mentionsApiKey = normalized.includes('api key');
     const hasPermissionDenied = status === 'PERMISSION_DENIED' || code === 403;
     const isLeakedKey = hasLeakedMessage || (hasPermissionDenied && mentionsApiKey);
     const isPermissionDenied = hasPermissionDenied;
