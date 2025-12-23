@@ -116,42 +116,48 @@ const parseGeminiErrorString = (raw: string): GeminiInnerError | null => {
   }
 };
 
+const formatGeminiInnerError = (nested: GeminiInnerError | null) => {
+  if (!nested) return '';
+  const message = typeof nested.message === 'string' ? nested.message : '';
+  const code = nested.code;
+  const status = nested.status;
+  const normalized = message ? message.toLowerCase() : '';
+  const mentionsApiKey = normalized.includes('api key');
+  const isMissingApiKey = mentionsApiKey && (normalized.includes('not found') || normalized.includes('missing') || normalized.includes('invalid'));
+  const isInvalidArgumentMissingKey = (status === 'INVALID_ARGUMENT' || code === 400) && mentionsApiKey;
+  if (isMissingApiKey || isInvalidArgumentMissingKey) {
+    const keyList = GEMINI_KEY_ENV_ORDER.join(' or ');
+    return `Gemini API key missing or invalid. Add ${keyList} to your .env.local file and restart the app.`;
+  }
+  // Known Gemini responses for leaked keys include PERMISSION_DENIED 403 with "Your API key was reported as leaked".
+  // Update the patterns below if SDK messaging changes.
+  const hasLeakedMessage = normalized.includes('reported as leaked');
+  const hasPermissionDenied = status === 'PERMISSION_DENIED' || code === 403;
+  const isLeakedKey = hasLeakedMessage || (hasPermissionDenied && mentionsApiKey);
+  if (isLeakedKey) {
+    return 'Gemini API key was reported as leaked. Generate a new API key in Google AI Studio and update your .env.local file.';
+  }
+  if (hasPermissionDenied) {
+    return message || 'Permission denied. Check your Gemini API key configuration.';
+  }
+  return message || '';
+};
+
 const formatAgentError = (error: unknown) => {
   if (!error) return '';
-  if (error instanceof Error) return error.message;
+  if (error instanceof Error) {
+    const parsed = parseGeminiErrorString(error.message);
+    if (parsed) return formatGeminiInnerError(parsed);
+    return error.message;
+  }
   if (typeof error === 'string') {
     const parsed = parseGeminiErrorString(error);
-    if (parsed) return formatAgentError(parsed);
+    if (parsed) return formatGeminiInnerError(parsed);
     return error;
   }
   if (typeof error === 'object' && error !== null) {
     const structured = error as Partial<GeminiErrorPayload>;
-    const nested = unwrapGeminiError(structured);
-    if (!nested) return '';
-    const message = typeof nested.message === 'string' ? nested.message : '';
-    const code = nested.code;
-    const status = nested.status;
-    const normalized = message ? message.toLowerCase() : '';
-    const mentionsApiKey = normalized.includes('api key');
-    const isMissingApiKey = mentionsApiKey && (normalized.includes('not found') || normalized.includes('missing') || normalized.includes('invalid'));
-    const isInvalidArgumentMissingKey = (status === 'INVALID_ARGUMENT' || code === 400) && mentionsApiKey;
-    if (isMissingApiKey || isInvalidArgumentMissingKey) {
-      const keyList = GEMINI_KEY_ENV_ORDER.join(' or ');
-      return `Gemini API key missing or invalid. Add ${keyList} to your .env.local file and restart the app.`;
-    }
-    // Known Gemini responses for leaked keys include PERMISSION_DENIED 403 with "Your API key was reported as leaked".
-    // Update the patterns below if SDK messaging changes.
-    const hasLeakedMessage = normalized.includes('reported as leaked');
-    const hasPermissionDenied = status === 'PERMISSION_DENIED' || code === 403;
-    const isLeakedKey = hasLeakedMessage || (hasPermissionDenied && mentionsApiKey);
-    const isPermissionDenied = hasPermissionDenied;
-    if (isLeakedKey) {
-      return 'Gemini API key was reported as leaked. Generate a new API key in Google AI Studio and update your .env.local file.';
-    }
-    if (isPermissionDenied) {
-      return message || 'Permission denied. Check your Gemini API key configuration.';
-    }
-    return message || '';
+    return formatGeminiInnerError(unwrapGeminiError(structured));
   }
   return '';
 };
