@@ -7,12 +7,13 @@ interface Props {
   onToggleZen: () => void;
   zenMode: boolean;
   srcDoc?: string;
+  beforeDoc?: string | null;
   onRunPreview?: () => void;
   lastRun?: number | null;
   stateSnapshot?: Record<string, string>;
 }
 
-export function Preview({ file, theme, onToggleZen, zenMode, srcDoc, onRunPreview, lastRun, stateSnapshot = {} }: Props) {
+export function Preview({ file, theme, onToggleZen, zenMode, srcDoc, beforeDoc, onRunPreview, lastRun, stateSnapshot = {} }: Props) {
   const entries = useMemo(() => Object.entries(stateSnapshot), [stateSnapshot]);
   const timestamp = lastRun ? new Date(lastRun).toLocaleTimeString() : null;
 
@@ -46,18 +47,51 @@ export function Preview({ file, theme, onToggleZen, zenMode, srcDoc, onRunPrevie
       </div>
 
       <div className="flex-1 overflow-hidden relative">
-        {srcDoc ? (
-          <iframe
-            key={lastRun ?? srcDoc}
-            srcDoc={srcDoc}
-            sandbox="allow-scripts"
-            title="Live preview"
-            className="w-full h-full border-0"
-          />
-        ) : (
-          <div className="h-full flex items-center justify-center text-sm text-gray-500 p-4 text-center">
-            {file ? 'Preparing live preview...' : 'Select a file to preview its content.'}
+        {beforeDoc ? (
+          <div className="h-full grid grid-cols-1 md:grid-cols-2 gap-2 p-2">
+            <div className="flex flex-col h-full border border-white/10 rounded-lg overflow-hidden">
+              <div className="px-3 py-1.5 text-[11px] uppercase tracking-wide font-bold bg-white/5">Before</div>
+              <iframe
+                key={`before-${lastRun}`}
+                srcDoc={beforeDoc}
+                sandbox="allow-scripts"
+                title="Previous preview"
+                className="w-full h-full border-0"
+              />
+            </div>
+            <div className="flex flex-col h-full border border-emerald-500/30 rounded-lg overflow-hidden">
+              <div className="px-3 py-1.5 text-[11px] uppercase tracking-wide font-bold bg-emerald-500/10 text-emerald-200">After</div>
+              {srcDoc ? (
+                <iframe
+                  key={lastRun ?? srcDoc}
+                  srcDoc={srcDoc}
+                  sandbox="allow-scripts"
+                  title="Live preview"
+                  className="w-full h-full border-0"
+                />
+              ) : (
+                <div className="h-full flex items-center justify-center text-sm text-gray-500 p-4 text-center">
+                  {file ? 'Preparing live preview...' : 'Select a file to preview its content.'}
+                </div>
+              )}
+            </div>
           </div>
+        ) : (
+          <>
+            {srcDoc ? (
+              <iframe
+                key={lastRun ?? srcDoc}
+                srcDoc={srcDoc}
+                sandbox="allow-scripts"
+                title="Live preview"
+                className="w-full h-full border-0"
+              />
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500 p-4 text-center">
+                {file ? 'Preparing live preview...' : 'Select a file to preview its content.'}
+              </div>
+            )}
+          </>
         )}
 
         {entries.length > 0 && (
