@@ -341,17 +341,6 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!activeFile) return;
-    const timer = setTimeout(() => refreshLivePreview(activeFile), 250);
-    return () => clearTimeout(timer);
-  }, [activeFile, activeFile?.content, refreshLivePreview]);
-
-  useEffect(() => {
-    if (!activeFile) return;
-    localStorage.setItem('symbiotic_app_state', JSON.stringify({ filename: activeFile.name, snapshot: appStateSnapshot, content: activeFile.content }));
-  }, [activeFile, appStateSnapshot]);
-
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   const toggleZenMode = () => {
     setZenMode(prev => {
@@ -376,6 +365,17 @@ export default function App() {
     localStorage.setItem('symbiotic_preview_time', String(now));
     localStorage.setItem('symbiotic_app_state', JSON.stringify({ filename: target.name, snapshot, content: target.content }));
   }, [activeFile]);
+
+  useEffect(() => {
+    if (!activeFile) return;
+    const timer = setTimeout(() => refreshLivePreview(activeFile), 250);
+    return () => clearTimeout(timer);
+  }, [activeFile, activeFile?.content, refreshLivePreview]);
+
+  useEffect(() => {
+    if (!activeFile) return;
+    localStorage.setItem('symbiotic_app_state', JSON.stringify({ filename: activeFile.name, snapshot: appStateSnapshot, content: activeFile.content }));
+  }, [activeFile, appStateSnapshot]);
 
   const updateFileContent = useCallback((newContent: string) => {
     if (!activeFile) return;
