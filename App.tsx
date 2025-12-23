@@ -91,7 +91,9 @@ const detectTemplateKey = (request: string): keyof typeof TEMPLATES | null => {
   return null;
 };
 
+/** Minimal shape of Gemini error payloads returned by the SDK. */
 type GeminiInnerError = { code?: number; message?: string; status?: string };
+/** Gemini errors may nest the payload under an `error` key or surface fields at the top level. */
 type GeminiErrorPayload = { error?: GeminiInnerError } | GeminiInnerError;
 
 const formatAgentError = (error: unknown) => {
@@ -105,10 +107,12 @@ const formatAgentError = (error: unknown) => {
     const code = nested?.code;
     const status = nested?.status;
     const normalized = message ? message.toLowerCase() : '';
-    if (normalized.includes('reported as leaked') || (code === 403 && status === 'PERMISSION_DENIED' && normalized.includes('api key'))) {
+    const isLeakedKey = normalized.includes('reported as leaked') || (code === 403 && status === 'PERMISSION_DENIED' && normalized.includes('api key'));
+    const isPermissionDenied = code === 403 || status === 'PERMISSION_DENIED';
+    if (isLeakedKey) {
       return 'Gemini API key was reported as leaked. Generate a new API key in Google AI Studio and update your .env.local file.';
     }
-    if (code === 403 || status === 'PERMISSION_DENIED') {
+    if (isPermissionDenied) {
       return message || 'Permission denied. Check your Gemini API key configuration.';
     }
     return message || '';
