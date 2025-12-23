@@ -118,7 +118,10 @@ const parseGeminiErrorString = (raw: string): GeminiInnerError | null => {
 
 const formatAgentError = (error: unknown) => {
   if (!error) return '';
-  if (error instanceof Error) return error.message;
+  if (error instanceof Error) {
+    const parsed = parseGeminiErrorString(error.message);
+    return parsed ? formatAgentError(parsed) : error.message;
+  }
   if (typeof error === 'string') {
     const parsed = parseGeminiErrorString(error);
     if (parsed) return formatAgentError(parsed);
