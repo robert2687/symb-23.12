@@ -13,7 +13,7 @@ const sanitizeGeminiKey = (rawKey?: string) => {
   if (!sanitized) return '';
   const hashed = createHash('sha256').update(sanitized).digest('hex');
   if (BLOCKED_GEMINI_KEY_HASHES.has(hashed)) {
-    console.warn('Gemini API key is blocked because it was exposed. Generate a new key in Google AI Studio and update your .env file.');
+    console.warn('Gemini API key is blocked because it was exposed. Generate a new key in Google AI Studio and set VITE_GEMINI_API_KEY (or GEMINI_API_KEY / API_KEY) in your environment.');
     return '';
   }
   return sanitized;
@@ -22,7 +22,7 @@ const sanitizeGeminiKey = (rawKey?: string) => {
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     // Resolve the key once using the configured precedence (VITE_GEMINI_API_KEY, GEMINI_API_KEY, API_KEY).
-    const resolvedKey = GEMINI_KEY_ENV_ORDER.map(key => env[key]?.trim()).find(value => value);
+    const resolvedKey = GEMINI_KEY_ENV_ORDER.map(key => env[key]).find(value => value);
     const geminiKey = sanitizeGeminiKey(resolvedKey);
     return {
        server: {
