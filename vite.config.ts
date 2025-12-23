@@ -8,15 +8,31 @@ export default defineConfig(({ mode }) => {
     // Resolve the key once using the configured precedence (VITE_GEMINI_API_KEY, GEMINI_API_KEY, API_KEY).
     const geminiKey = GEMINI_KEY_ENV_ORDER.map(key => env[key]?.trim()).find(value => value) || '';
     return {
-      server: {
-        port: 3000,
-        host: '0.0.0.0',
+       server: {
+         port: 3000,
+         host: '0.0.0.0',
+       },
+       plugins: [react()],
+      // The bundle includes a few large third-party packages; split them into
+      // dedicated chunks and raise the warning threshold to avoid noisy builds
+      // while keeping initial load lean.
+      build: {
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              react: ['react', 'react-dom'],
+              genai: ['@google/genai'],
+              dndkit: ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
+              icons: ['lucide-react'],
+            },
+          },
+        },
+        chunkSizeWarningLimit: 700,
       },
-      plugins: [react()],
-      define: {
-        'import.meta.env.RESOLVED_GEMINI_API_KEY': JSON.stringify(geminiKey),
-        'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(geminiKey),
-        'import.meta.env.GEMINI_API_KEY': JSON.stringify(geminiKey),
+       define: {
+         'import.meta.env.RESOLVED_GEMINI_API_KEY': JSON.stringify(geminiKey),
+         'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(geminiKey),
+         'import.meta.env.GEMINI_API_KEY': JSON.stringify(geminiKey),
         'process.env.API_KEY': JSON.stringify(geminiKey),
         'process.env.GEMINI_API_KEY': JSON.stringify(geminiKey)
       },
