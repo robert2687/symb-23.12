@@ -1,5 +1,13 @@
 {
   "name": "Symbiotic23.12",
   "description": "A next-generation AI-powered Integrated Development Environment where you collaborate with specialized AI agents (Architect, Developer, QA) to build software.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "solutions": [
+    "Gemini-powered agentic IDE (requires API key)"
+  ],
+  "options": [
+    "VITE_GEMINI_API_KEY",
+    "GEMINI_API_KEY",
+    "API_KEY"
+  ]
 }
