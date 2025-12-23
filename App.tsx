@@ -101,14 +101,19 @@ const formatAgentError = (error: unknown) => {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
   if (typeof error === 'object' && error !== null) {
-    const structured = error as GeminiErrorPayload;
-    const nested = 'error' in structured && structured.error ? structured.error : structured;
-    const message = typeof nested?.message === 'string' ? nested.message : '';
-    const code = nested?.code;
-    const status = nested?.status;
+    const structured = error as Partial<GeminiErrorPayload>;
+    const nestedCandidate = 'error' in structured && structured.error ? structured.error : structured;
+    if (typeof nestedCandidate !== 'object' || nestedCandidate === null) return '';
+    const nested = nestedCandidate as GeminiInnerError;
+    const message = typeof nested.message === 'string' ? nested.message : '';
+    const code = nested.code;
+    const status = nested.status;
     const normalized = message ? message.toLowerCase() : '';
-    const isLeakedKey = normalized.includes('reported as leaked') || (code === 403 && status === 'PERMISSION_DENIED' && normalized.includes('api key'));
-    const isPermissionDenied = code === 403 || status === 'PERMISSION_DENIED';
+    const hasLeakedMessage = normalized.includes('reported as leaked');
+    const mentionsApiKey = normalized.includes('api key');
+    const isPermissionDeniedStatus = code === 403 && status === 'PERMISSION_DENIED';
+    const isLeakedKey = hasLeakedMessage || (isPermissionDeniedStatus && mentionsApiKey);
+    const isPermissionDenied = isPermissionDeniedStatus || code === 403 || status === 'PERMISSION_DENIED';
     if (isLeakedKey) {
       return 'Gemini API key was reported as leaked. Generate a new API key in Google AI Studio and update your .env.local file.';
     }
