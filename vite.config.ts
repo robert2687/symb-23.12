@@ -4,6 +4,7 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { GEMINI_KEY_ENV_ORDER } from './envKeys';
 
+// SHA-256 hashes of known compromised Gemini API keys. Add hashes here to block them at build time.
 const BLOCKED_GEMINI_KEY_HASHES = new Set([
   'c83922dee0374346dc5f5f7a16de494ad136470a05658dcb72a4bc4b279503fb', // leaked key, do not use
 ]);
