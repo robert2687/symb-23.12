@@ -91,6 +91,26 @@ const detectTemplateKey = (request: string): keyof typeof TEMPLATES | null => {
   return null;
 };
 
+const formatAgentError = (error: unknown) => {
+  if (!error) return '';
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (typeof error === 'object') {
+    const nested = (error as any).error || error;
+    const message = typeof nested?.message === 'string' ? nested.message : '';
+    const code = nested?.code;
+    const status = nested?.status;
+    if (message.toLowerCase().includes('reported as leaked')) {
+      return 'Gemini API key was reported as leaked. Generate a new API key in Google AI Studio and update your .env.local file.';
+    }
+    if (code === 403 || status === 'PERMISSION_DENIED') {
+      return message || 'Permission denied. Check your Gemini API key configuration.';
+    }
+    return message || '';
+  }
+  return '';
+};
+
 const extractMarkup = (content: string) => {
   const match = content.match(/return\s*\(([\s\S]*?)\)\s*;?/);
   const normalize = (value: string) => {
@@ -772,7 +792,7 @@ Plan small, atomic components (Logo.tsx, NavLinks.tsx, UserMenu.tsx etc.) and en
       }
     } catch (e) {
       console.error(e);
-      const detail = e instanceof Error ? e.message : String(e);
+      const detail = formatAgentError(e);
       const errorMessage = detail ? `Error connecting to agents: ${detail}` : "Error connecting to agents. Mission aborted.";
       setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: `${errorMessage} Please verify your Gemini API key and network access.`, timestamp: new Date() }]);
     } finally {
