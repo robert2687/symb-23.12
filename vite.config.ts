@@ -9,13 +9,14 @@ const BLOCKED_GEMINI_KEY_HASHES = new Set([
 ]);
 
 const sanitizeGeminiKey = (rawKey?: string) => {
-  if (!rawKey) return '';
-  const hashed = createHash('sha256').update(rawKey).digest('hex');
+  const sanitized = rawKey?.trim();
+  if (!sanitized) return '';
+  const hashed = createHash('sha256').update(sanitized).digest('hex');
   if (BLOCKED_GEMINI_KEY_HASHES.has(hashed)) {
     console.warn('Gemini API key is blocked because it was exposed. Please generate a new key.');
     return '';
   }
-  return rawKey.trim();
+  return sanitized;
 };
 
 export default defineConfig(({ mode }) => {
