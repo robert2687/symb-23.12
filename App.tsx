@@ -68,6 +68,103 @@ const EXAMPLE_PROMPTS = [
   "Make a SaaS landing page"
 ];
 
+const PREVIEW_REFRESH_MS = 250;
+const PREVIEW_NONCE = 'symbiotic-preview-nonce';
+
+const escapeHtml = (input: string) =>
+  input.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+const extractMarkup = (content: string) => {
+  const match = content.match(/return\s*\(([\s\S]*?)\)\s*;?/);
+  const normalize = (value: string) => {
+    const sanitized = value.replace(/className=/g, 'class=').trim();
+    return sanitized || `<pre style="padding:16px;font-family:monospace">${escapeHtml(content)}</pre>`;
+  };
+  if (match?.[1]) return normalize(match[1]);
+
+  const fragmentMatch = content.match(/return\s*<>\s*([\s\S]*?)\s*<\/>/);
+  if (fragmentMatch?.[1]) return normalize(fragmentMatch[1]);
+
+  const jsxStart = content.indexOf('<');
+  const jsxEnd = content.lastIndexOf('>');
+  if (jsxStart !== -1 && jsxEnd > jsxStart) {
+    return normalize(content.slice(jsxStart, jsxEnd + 1));
+  }
+
+  return `<pre style="padding:16px;font-family:monospace">${escapeHtml(content)}</pre>`;
+};
+
+const analyzeAppState = (content: string) => {
+  const snapshot: Record<string, string> = {};
+  const matches = [...content.matchAll(/const\s*\[\s*([\w$]+)[^\]]*\]\s*=\s*useState(?:<[^>]+>)?\(([^)]+)\)/g)];
+  matches.forEach(([, key, value]) => {
+    snapshot[key] = value.trim().replace(/^['"`]|['"`]$/g, '');
+  });
+  return snapshot;
+};
+
+const buildPreviewDocument = (file: FileNode | null, snapshot: Record<string, string>) => {
+  if (!file?.content) return '';
+  const markup = extractMarkup(file.content);
+  const stateJson = JSON.stringify(snapshot || {});
+  return `
+  <!doctype html>
+  <html>
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'nonce-${PREVIEW_NONCE}'; script-src 'self' 'nonce-${PREVIEW_NONCE}'; img-src data: 'self'">
+      <style nonce="${PREVIEW_NONCE}">
+        body { margin: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0b1021; color: #e2e8f0; }
+        .__symbiotic_state { position: fixed; bottom: 12px; right: 12px; background: rgba(15,23,42,0.85); color: #cbd5f5; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(148,163,184,0.4); font-size: 12px; max-width: 320px; }
+        .__symbiotic_state pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
+      </style>
+    </head>
+    <body>
+      <div id="app">${markup}</div>
+      <div class="__symbiotic_state">
+        <strong>Persisted state</strong>
+        <pre>${escapeHtml(stateJson)}</pre>
+      </div>
+      <script nonce="${PREVIEW_NONCE}">
+        try {
+          const saved = localStorage.getItem('symbiotic_app_state_data');
+          const fallback = ${stateJson};
+          const next = saved ? JSON.parse(saved) : fallback;
+          localStorage.setItem('symbiotic_app_state_data', JSON.stringify(next));
+          window.__SYMBIOTIC_STATE__ = next;
+          window.addEventListener('message', (event) => {
+            if (event?.origin && event.origin !== window.location.origin) return;
+            if (event?.data?.type === 'symbiotic_state_update') {
+              localStorage.setItem('symbiotic_app_state_data', JSON.stringify(event.data.payload));
+            }
+          });
+        } catch (err) {
+          console.warn('State hydration failed', err);
+        }
+      </script>
+    </body>
+  </html>`;
+};
+
+const mergeAppContent = (nodes: FileNode[], persisted?: { filename?: string; content?: string }) => {
+  if (!persisted?.content) return nodes;
+  return nodes.map(node => {
+    if (node.type === 'file') {
+      const isAppFile = node.name.toLowerCase().startsWith('app');
+      const matchesPersisted = persisted.filename ? node.name.toLowerCase() === persisted.filename.toLowerCase() : isAppFile;
+      if (matchesPersisted) {
+        return { ...node, content: persisted.content };
+      }
+      return node;
+    }
+    if (node.children) {
+      return { ...node, children: mergeAppContent(node.children, persisted) };
+    }
+    return node;
+  });
+};
+
 const EmptyState = ({ onStart, onExampleClick, theme }: { onStart: () => void, onExampleClick: (text: string) => void, theme: Theme }) => (
   <div className={`h-full flex flex-col items-center justify-center text-center p-6 relative overflow-hidden ${theme === 'dark' ? 'bg-[#1e1e2e]' : 'bg-gray-50'}`}>
     <div className={`absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] ${theme === 'dark' ? 'from-indigo-900/20 via-[#1e1e2e] to-[#1e1e2e]' : 'from-indigo-200/40 via-gray-50 to-gray-50'}`} />
@@ -95,8 +192,25 @@ const EmptyState = ({ onStart, onExampleClick, theme }: { onStart: () => void, o
              className={`p-3 md:p-4 rounded-xl text-xs md:text-sm font-medium transition-all text-left border group ${theme === 'dark' ? 'bg-white/5 border-white/5 text-gray-300 hover:bg-white/10' : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300 shadow-sm'}`}
            >
              <span className="group-hover:text-indigo-500 transition-colors">"{prompt}"</span>
-           </button>
+            </button>
         ))}
+    </div>
+
+    <div className="relative z-10 mt-8 grid grid-cols-1 md:grid-cols-3 gap-3 w-full max-w-3xl">
+      {[
+        { title: 'Open AI Command Center', hint: 'Chat with agents using natural language', action: onStart },
+        { title: 'Preview instantly', hint: 'See the live output of the current file', action: () => onExampleClick('Show me the live preview of the current screen') },
+        { title: 'Start from a template', hint: 'Try Kanban, Calculator, Todo, Login', action: () => onExampleClick('Build a Kanban board with resizable columns') },
+      ].map((item, idx) => (
+        <button
+          key={idx}
+          onClick={item.action}
+          className={`p-4 rounded-xl text-left border shadow-sm transition-all hover:-translate-y-0.5 ${theme === 'dark' ? 'bg-white/5 border-white/10 text-gray-200 hover:border-indigo-400/40' : 'bg-white border-gray-200 text-gray-700 hover:border-indigo-200'}`}
+        >
+          <div className="text-sm font-bold mb-1">{item.title}</div>
+          <p className="text-xs text-gray-400">{item.hint}</p>
+        </button>
+      ))}
     </div>
   </div>
 );
@@ -104,18 +218,24 @@ const EmptyState = ({ onStart, onExampleClick, theme }: { onStart: () => void, o
 export default function App() {
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('symbiotic_theme') as Theme) || 'dark');
   const [activeTab, setActiveTab] = useState<'editor' | 'preview'>('editor');
-  const [rightTab, setRightTab] = useState<'chat' | 'tasks'>('chat');
+  const [rightTab, setRightTab] = useState<'chat' | 'tasks' | 'preview'>('chat');
   const [mobileView, setMobileView] = useState<'files' | 'editor' | 'preview' | 'hub'>('editor');
   
   const [leftWidth, setLeftWidth] = useState(() => Number(localStorage.getItem('symbiotic_left_width')) || 280);
   const [rightWidth, setRightWidth] = useState(() => Number(localStorage.getItem('symbiotic_right_width')) || 400);
   const isResizingLeft = useRef(false);
   const isResizingRight = useRef(false);
+  const isResizingBottom = useRef(false);
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const [bottomHeight, setBottomHeight] = useState(() => Number(localStorage.getItem('symbiotic_bottom_height')) || 220);
 
   const [files, setFiles] = useState<FileNode[]>(() => {
     try {
       const saved = localStorage.getItem('symbiotic_files');
-      return saved ? JSON.parse(saved) : INITIAL_FILES;
+      const persistedApp = localStorage.getItem('symbiotic_app_state');
+      const parsedPersisted = persistedApp ? JSON.parse(persistedApp) : null;
+      const base = saved ? JSON.parse(saved) : INITIAL_FILES;
+      return mergeAppContent(base, parsedPersisted);
     } catch (e) {
       console.error("Corrupted local storage for files, resetting to default.", e);
       return INITIAL_FILES;
@@ -133,6 +253,19 @@ export default function App() {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [livePreviewDoc, setLivePreviewDoc] = useState<string>(() => localStorage.getItem('symbiotic_preview_doc') || '');
+  const [lastPreviewRun, setLastPreviewRun] = useState<number | null>(() => {
+    const saved = localStorage.getItem('symbiotic_preview_time');
+    return saved ? Number(saved) : null;
+  });
+  const [appStateSnapshot, setAppStateSnapshot] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('symbiotic_app_state');
+      return saved ? (JSON.parse(saved).snapshot || {}) : {};
+    } catch {
+      return {};
+    }
+  });
 
   // Auth & Settings State
   const [user, setUser] = useState<User | null>(() => {
@@ -170,8 +303,11 @@ export default function App() {
 
   const performSave = useCallback(() => {
     localStorage.setItem('symbiotic_files', JSON.stringify(files));
+    if (activeFile) {
+      localStorage.setItem('symbiotic_app_state', JSON.stringify({ filename: activeFile.name, snapshot: appStateSnapshot, content: activeFile.content }));
+    }
     setSaveStatus('saved');
-  }, [files]);
+  }, [files, activeFile, appStateSnapshot]);
 
   useEffect(() => {
     if (saveStatus === 'saving') {
@@ -201,11 +337,19 @@ export default function App() {
         const newWidth = Math.min(Math.max(window.innerWidth - e.clientX, 300), 600);
         setRightWidth(newWidth);
         localStorage.setItem('symbiotic_right_width', String(newWidth));
+      } else if (isResizingBottom.current && workspaceRef.current) {
+        const rect = workspaceRef.current.getBoundingClientRect();
+        const available = rect.bottom - e.clientY;
+        const maxHeight = Math.max(160, Math.min(rect.height - 160, 480));
+        const nextHeight = Math.min(Math.max(available, 140), maxHeight);
+        setBottomHeight(nextHeight);
+        localStorage.setItem('symbiotic_bottom_height', String(nextHeight));
       }
     };
     const handleMouseUp = () => {
       isResizingLeft.current = false;
       isResizingRight.current = false;
+      isResizingBottom.current = false;
       document.body.style.cursor = 'default';
       document.body.style.userSelect = 'auto';
     };
@@ -227,6 +371,31 @@ export default function App() {
       return !prev;
     });
   };
+
+  const refreshLivePreview = useCallback((file?: FileNode | null) => {
+    const target = file ?? activeFile;
+    if (!target) return;
+    const snapshot = analyzeAppState(target.content || '');
+    setAppStateSnapshot(snapshot);
+    const doc = buildPreviewDocument(target, snapshot);
+    setLivePreviewDoc(doc);
+    const now = Date.now();
+    setLastPreviewRun(now);
+    localStorage.setItem('symbiotic_preview_doc', doc);
+    localStorage.setItem('symbiotic_preview_time', String(now));
+    localStorage.setItem('symbiotic_app_state', JSON.stringify({ filename: target.name, snapshot, content: target.content }));
+  }, [activeFile]);
+
+  useEffect(() => {
+    if (!activeFile) return;
+    const timer = setTimeout(() => refreshLivePreview(activeFile), PREVIEW_REFRESH_MS);
+    return () => clearTimeout(timer);
+  }, [activeFile, activeFile?.content, refreshLivePreview]);
+
+  useEffect(() => {
+    if (!activeFile) return;
+    localStorage.setItem('symbiotic_app_state', JSON.stringify({ filename: activeFile.name, snapshot: appStateSnapshot, content: activeFile.content }));
+  }, [activeFile, appStateSnapshot]);
 
   const updateFileContent = useCallback((newContent: string) => {
     if (!activeFile) return;
@@ -502,6 +671,13 @@ export default function App() {
                   {saveStatus === 'saved' ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
                   {saveStatus === 'saved' ? 'Saved' : 'Save'}
                 </button>
+                <button
+                  onClick={() => { refreshLivePreview(activeFile); setActiveTab('preview'); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-all"
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  Run Preview
+                </button>
                 <div className="flex p-1 bg-[#18181b] rounded-lg border border-white/10">
                   <button onClick={() => setActiveTab('editor')} className={`px-3 py-1.5 rounded-md text-xs font-medium ${activeTab === 'editor' ? 'bg-[#27272a] text-white' : 'text-gray-500'}`}>Editor</button>
                   <button onClick={() => setActiveTab('preview')} className={`px-3 py-1.5 rounded-md text-xs font-medium ${activeTab === 'preview' ? 'bg-[#27272a] text-white' : 'text-gray-500'}`}>Preview</button>
@@ -512,16 +688,76 @@ export default function App() {
         </div>
 
         <div className="flex-1 relative overflow-hidden">
-          <div className="hidden md:block h-full">
-            {!activeFile ? <EmptyState onStart={() => setRightTab('chat')} onExampleClick={handleExampleClick} theme={theme} /> : 
-              activeTab === 'editor' ? <Editor file={activeFile} onChange={updateFileContent} theme={theme} onUndo={() => {}} onRedo={() => {}} canUndo={false} canRedo={false} onSave={performSave} saveStatus={saveStatus} /> :
-              <Preview file={activeFile} theme={theme} onToggleZen={toggleZenMode} zenMode={zenMode} />}
+          <div ref={workspaceRef} className="hidden md:flex h-full">
+            <div className="flex flex-col w-full h-full">
+              <div style={{ height: `calc(100% - ${bottomHeight}px)` }} className="relative">
+                {!activeFile ? <EmptyState onStart={() => setRightTab('chat')} onExampleClick={handleExampleClick} theme={theme} /> : 
+                  activeTab === 'editor' ? <Editor file={activeFile} onChange={updateFileContent} theme={theme} onUndo={() => {}} onRedo={() => {}} canUndo={false} canRedo={false} onSave={performSave} saveStatus={saveStatus} /> :
+                  <Preview file={activeFile} theme={theme} onToggleZen={toggleZenMode} zenMode={zenMode} srcDoc={livePreviewDoc} onRunPreview={() => refreshLivePreview(activeFile)} lastRun={lastPreviewRun} stateSnapshot={appStateSnapshot} />}
+              </div>
+              <div style={{ height: `${bottomHeight}px` }} className={`relative border-t ${theme === 'dark' ? 'border-white/10 bg-[#0b0b12]' : 'border-gray-200 bg-gray-50'} overflow-hidden`}>
+                <div 
+                  onMouseDown={() => { isResizingBottom.current = true; document.body.style.cursor = 'row-resize'; document.body.style.userSelect = 'none'; }} 
+                  className="absolute -top-1 left-0 right-0 h-2 cursor-row-resize z-20 group"
+                >
+                  <div className="absolute left-1/2 -translate-x-1/2 w-24 h-[2px] bg-transparent group-hover:bg-indigo-400/60 transition-colors" />
+                </div>
+                <div className="flex items-center justify-between px-4 py-2 border-b border-white/5">
+                  <div className="text-xs font-bold uppercase tracking-wide flex items-center gap-2">
+                    Simulation Monitor
+                    {isProcessing && <span className="text-amber-400 text-[10px]">Agents running...</span>}
+                  </div>
+                  <button 
+                    onClick={() => { refreshLivePreview(activeFile); setActiveTab('preview'); }}
+                    className="text-[11px] px-3 py-1 rounded-md bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition-all"
+                  >
+                    Run Preview
+                  </button>
+                </div>
+                <div style={{ height: 'calc(100% - 42px)' }} className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 overflow-auto custom-scrollbar">
+                  <div className={`p-3 rounded-xl border ${theme === 'dark' ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-white'}`}>
+                    <div className="text-[11px] uppercase font-bold text-indigo-400 mb-2">Recent Messages</div>
+                    <div className="space-y-2 max-h-40 overflow-auto custom-scrollbar">
+                      {messages.slice(-4).reverse().map(msg => (
+                        <div key={msg.id} className="text-xs leading-relaxed">
+                          <span className="font-semibold text-indigo-300">{msg.sender}</span>: <span className="text-gray-300">{msg.text}</span>
+                        </div>
+                      ))}
+                      {messages.length === 0 && <div className="text-xs text-gray-500">Agents are idle. Send a command from the AI Hub.</div>}
+                    </div>
+                  </div>
+                  <div className={`p-3 rounded-xl border ${theme === 'dark' ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-white'}`}>
+                    <div className="text-[11px] uppercase font-bold text-indigo-400 mb-2">Tasks</div>
+                    <div className="space-y-2 max-h-40 overflow-auto custom-scrollbar">
+                      {tasks.length === 0 && <div className="text-xs text-gray-500">No active tasks yet.</div>}
+                      {tasks.map(task => (
+                        <div key={task.id} className="flex items-center justify-between text-xs">
+                          <div className="font-semibold">{task.title}</div>
+                          <span className="px-2 py-0.5 rounded-full border border-white/10">{task.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           <div className="md:hidden h-full">
             {mobileView === 'files' && <div className="p-4 space-y-4"><h2 className="text-lg font-bold">Project Explorer</h2>{files.map(node => <FileTreeItem key={node.name} node={node} onSelect={(f) => { setActiveFile(f); setMobileView('editor'); }} activeFileName={activeFile?.name} theme={theme} />)}</div>}
             {mobileView === 'editor' && (activeFile ? <Editor file={activeFile} onChange={updateFileContent} theme={theme} onUndo={() => {}} onRedo={() => {}} canUndo={false} canRedo={false} onSave={performSave} saveStatus={saveStatus} /> : <EmptyState onStart={() => setMobileView('hub')} onExampleClick={handleExampleClick} theme={theme} />)}
-            {mobileView === 'preview' && <Preview file={activeFile} theme={theme} onToggleZen={toggleZenMode} zenMode={zenMode} />}
-            {mobileView === 'hub' && <div className="h-full flex flex-col"><div className="flex h-10 border-b border-white/5"><button onClick={() => setRightTab('chat')} className={`flex-1 text-[10px] font-bold uppercase tracking-wider ${rightTab === 'chat' ? 'text-indigo-400 bg-white/5' : 'text-gray-500'}`}>Chat</button><button onClick={() => setRightTab('tasks')} className={`flex-1 text-[10px] font-bold uppercase tracking-wider ${rightTab === 'tasks' ? 'text-indigo-400 bg-white/5' : 'text-gray-500'}`}>Tasks</button></div>{rightTab === 'chat' ? <ChatInterface messages={messages} inputValue={inputValue} setInputValue={setInputValue} onSendMessage={handleSendMessage} isProcessing={isProcessing} tasks={tasks} theme={theme} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} /> : <TasksView tasks={tasks} theme={theme} />}</div>}
+            {mobileView === 'preview' && <Preview file={activeFile} theme={theme} onToggleZen={toggleZenMode} zenMode={zenMode} srcDoc={livePreviewDoc} onRunPreview={() => refreshLivePreview(activeFile)} lastRun={lastPreviewRun} stateSnapshot={appStateSnapshot} />}
+            {mobileView === 'hub' && (
+              <div className="h-full flex flex-col">
+                <div className="flex h-10 border-b border-white/5">
+                  <button onClick={() => setRightTab('chat')} className={`flex-1 text-[10px] font-bold uppercase tracking-wider ${rightTab === 'chat' ? 'text-indigo-400 bg-white/5' : 'text-gray-500'}`}>Chat</button>
+                  <button onClick={() => setRightTab('tasks')} className={`flex-1 text-[10px] font-bold uppercase tracking-wider ${rightTab === 'tasks' ? 'text-indigo-400 bg-white/5' : 'text-gray-500'}`}>Tasks</button>
+                  <button onClick={() => setRightTab('preview')} className={`flex-1 text-[10px] font-bold uppercase tracking-wider ${rightTab === 'preview' ? 'text-indigo-400 bg-white/5' : 'text-gray-500'}`}>Preview</button>
+                </div>
+                {rightTab === 'chat' && <ChatInterface messages={messages} inputValue={inputValue} setInputValue={setInputValue} onSendMessage={handleSendMessage} isProcessing={isProcessing} tasks={tasks} theme={theme} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} />}
+                {rightTab === 'tasks' && <TasksView tasks={tasks} theme={theme} />}
+                {rightTab === 'preview' && <Preview file={activeFile} theme={theme} onToggleZen={toggleZenMode} zenMode={zenMode} srcDoc={livePreviewDoc} onRunPreview={() => refreshLivePreview(activeFile)} lastRun={lastPreviewRun} stateSnapshot={appStateSnapshot} />}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -533,9 +769,12 @@ export default function App() {
         <div className="h-12 flex border-b border-white/5 shrink-0">
           <button onClick={() => setRightTab('chat')} className={`flex-1 text-xs font-bold ${rightTab === 'chat' ? 'text-indigo-500' : 'text-gray-500'}`}>Chat</button>
           <button onClick={() => setRightTab('tasks')} className={`flex-1 text-xs font-bold ${rightTab === 'tasks' ? 'text-indigo-500' : 'text-gray-500'}`}>Tasks</button>
+          <button onClick={() => setRightTab('preview')} className={`flex-1 text-xs font-bold ${rightTab === 'preview' ? 'text-indigo-500' : 'text-gray-500'}`}>Preview</button>
         </div>
         <div className="flex-1 relative overflow-hidden">
-          {rightTab === 'chat' ? <ChatInterface messages={messages} inputValue={inputValue} setInputValue={setInputValue} onSendMessage={handleSendMessage} isProcessing={isProcessing} tasks={tasks} theme={theme} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} /> : <TasksView tasks={tasks} theme={theme} />}
+          {rightTab === 'chat' && <ChatInterface messages={messages} inputValue={inputValue} setInputValue={setInputValue} onSendMessage={handleSendMessage} isProcessing={isProcessing} tasks={tasks} theme={theme} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} />}
+          {rightTab === 'tasks' && <TasksView tasks={tasks} theme={theme} />}
+          {rightTab === 'preview' && <Preview file={activeFile} theme={theme} onToggleZen={toggleZenMode} zenMode={zenMode} srcDoc={livePreviewDoc} onRunPreview={() => refreshLivePreview(activeFile)} lastRun={lastPreviewRun} stateSnapshot={appStateSnapshot} />}
         </div>
       </div>
 
