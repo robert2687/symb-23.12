@@ -91,15 +91,16 @@ const detectTemplateKey = (request: string): keyof typeof TEMPLATES | null => {
   return null;
 };
 
-type GeminiErrorPayload = { error?: { code?: number; message?: string; status?: string }; code?: number; message?: string; status?: string };
+type GeminiInnerError = { code?: number; message?: string; status?: string };
+type GeminiErrorPayload = { error?: GeminiInnerError } | GeminiInnerError;
 
 const formatAgentError = (error: unknown) => {
   if (!error) return '';
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
-  if (typeof error === 'object') {
+  if (typeof error === 'object' && error !== null) {
     const structured = error as GeminiErrorPayload;
-    const nested = structured.error || structured;
+    const nested = 'error' in structured && structured.error ? structured.error : structured;
     const message = typeof nested?.message === 'string' ? nested.message : '';
     const code = nested?.code;
     const status = nested?.status;
