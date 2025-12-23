@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => {
         'import.meta.env.RESOLVED_GEMINI_API_KEY': JSON.stringify(geminiKey),
         'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(geminiKey),
         'process.env.API_KEY': JSON.stringify(geminiKey),
-        'process.env.GEMINI_API_KEY': JSON.stringify(geminiKey)
+        'process.env.GEMINI_API_KEY': JSON.stringify(geminiKey),
         // Surface the same resolved key through both import.meta and process fallbacks used in the app.
         'import.meta.env.GEMINI_API_KEY': JSON.stringify(geminiApiKey),
         'process.env.API_KEY': JSON.stringify(geminiApiKey),
