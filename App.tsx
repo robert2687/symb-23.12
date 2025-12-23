@@ -68,6 +68,8 @@ const EXAMPLE_PROMPTS = [
   "Make a SaaS landing page"
 ];
 
+const PREVIEW_REFRESH_MS = 250;
+
 const escapeHtml = (input: string) =>
   input.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -80,7 +82,7 @@ const extractMarkup = (content: string) => {
 
 const analyzeAppState = (content: string) => {
   const snapshot: Record<string, string> = {};
-  const matches = [...content.matchAll(/const\s*\[\s*(\w+)\s*,\s*set\w+\s*\]\s*=\s*useState\(([^)]+)\)/g)];
+  const matches = [...content.matchAll(/const\s*\[\s*([\w$]+)[^\]]*\]\s*=\s*useState(?:<[^>]+>)?\(([^)]+)\)/g)];
   matches.forEach(([, key, value]) => {
     snapshot[key] = value.trim().replace(/^['"`]|['"`]$/g, '');
   });
@@ -95,6 +97,9 @@ const buildPreviewDocument = (file: FileNode | null, snapshot: Record<string, st
   <!doctype html>
   <html>
     <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src data: 'self'">
       <style>
         body { margin: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0b1021; color: #e2e8f0; }
         .__symbiotic_state { position: fixed; bottom: 12px; right: 12px; background: rgba(15,23,42,0.85); color: #cbd5f5; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(148,163,184,0.4); font-size: 12px; max-width: 320px; }
@@ -368,7 +373,7 @@ export default function App() {
 
   useEffect(() => {
     if (!activeFile) return;
-    const timer = setTimeout(() => refreshLivePreview(activeFile), 250);
+    const timer = setTimeout(() => refreshLivePreview(activeFile), PREVIEW_REFRESH_MS);
     return () => clearTimeout(timer);
   }, [activeFile, activeFile?.content, refreshLivePreview]);
 

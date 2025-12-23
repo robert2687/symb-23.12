@@ -61,7 +61,12 @@ export function Preview({ file, theme, onToggleZen, zenMode, srcDoc, onRunPrevie
         )}
 
         {entries.length > 0 && (
-          <div className="absolute bottom-4 right-4 bg-black/60 text-xs p-3 rounded-xl border border-white/10 max-w-xs backdrop-blur">
+          <div
+            className="absolute bottom-4 right-4 bg-black/60 text-xs p-3 rounded-xl border border-white/10 max-w-xs backdrop-blur"
+            role="status"
+            aria-live="polite"
+            aria-label="Persisted application state"
+          >
             <div className="font-bold text-[11px] uppercase tracking-wide mb-1 text-indigo-200">App State (persisted)</div>
             <div className="space-y-1 max-h-32 overflow-auto pr-1 custom-scrollbar">
               {entries.map(([key, value]) => (

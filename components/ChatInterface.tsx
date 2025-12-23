@@ -34,10 +34,14 @@ export function ChatInterface({
 
   const taskSummary = useMemo(() => tasks.filter((t) => t.status === 'active').length, [tasks]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const runSubmit = () => {
     if (!inputValue.trim()) return;
     onSendMessage(selectedAgent, { useSearch, useThinking });
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    runSubmit();
   };
 
   return (
@@ -126,7 +130,8 @@ export function ChatInterface({
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                handleSubmit(e as unknown as React.FormEvent);
+                e.preventDefault();
+                runSubmit();
               }
             }}
             placeholder="Describe your app or issue commands for the agents. Press Ctrl/Cmd+Enter to run."
