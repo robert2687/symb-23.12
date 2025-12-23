@@ -91,6 +91,53 @@ const detectTemplateKey = (request: string): keyof typeof TEMPLATES | null => {
   return null;
 };
 
+/** Minimal shape of Gemini error payloads returned by the SDK. */
+type GeminiInnerError = { code?: number; message?: string; status?: string };
+
+/** Gemini errors may nest the payload under an `error` key or surface fields at the top level. */
+type GeminiErrorPayload = { error?: GeminiInnerError } | GeminiInnerError;
+
+const unwrapGeminiError = (error: Partial<GeminiErrorPayload>): GeminiInnerError | null => {
+  const nestedCandidate = 'error' in error && error.error ? error.error : error;
+  if (typeof nestedCandidate !== 'object' || nestedCandidate === null) return null;
+  const candidate = nestedCandidate as Record<string, unknown>;
+  const code = typeof candidate.code === 'number' ? candidate.code : undefined;
+  const message = typeof candidate.message === 'string' ? candidate.message : undefined;
+  const status = typeof candidate.status === 'string' ? candidate.status : undefined;
+  if (code === undefined && message === undefined && status === undefined) return null;
+  return { code, message, status };
+};
+
+const formatAgentError = (error: unknown) => {
+  if (!error) return '';
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (typeof error === 'object' && error !== null) {
+    const structured = error as Partial<GeminiErrorPayload>;
+    const nested = unwrapGeminiError(structured);
+    if (!nested) return '';
+    const message = typeof nested.message === 'string' ? nested.message : '';
+    const code = nested.code;
+    const status = nested.status;
+    const normalized = message ? message.toLowerCase() : '';
+    // Known Gemini responses for leaked keys include PERMISSION_DENIED 403 with "Your API key was reported as leaked".
+    // Update the patterns below if SDK messaging changes.
+    const hasLeakedMessage = normalized.includes('reported as leaked');
+    const mentionsApiKey = normalized.includes('api key');
+    const hasPermissionDenied = status === 'PERMISSION_DENIED' || code === 403;
+    const isLeakedKey = hasLeakedMessage || (hasPermissionDenied && mentionsApiKey);
+    const isPermissionDenied = hasPermissionDenied;
+    if (isLeakedKey) {
+      return 'Gemini API key was reported as leaked. Generate a new API key in Google AI Studio and update your .env.local file.';
+    }
+    if (isPermissionDenied) {
+      return message || 'Permission denied. Check your Gemini API key configuration.';
+    }
+    return message || '';
+  }
+  return '';
+};
+
 const extractMarkup = (content: string) => {
   const match = content.match(/return\s*\(([\s\S]*?)\)\s*;?/);
   const normalize = (value: string) => {
@@ -772,7 +819,7 @@ Plan small, atomic components (Logo.tsx, NavLinks.tsx, UserMenu.tsx etc.) and en
       }
     } catch (e) {
       console.error(e);
-      const detail = e instanceof Error ? e.message : String(e);
+      const detail = formatAgentError(e);
       const errorMessage = detail ? `Error connecting to agents: ${detail}` : "Error connecting to agents. Mission aborted.";
       setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: `${errorMessage} Please verify your Gemini API key and network access.`, timestamp: new Date() }]);
     } finally {
