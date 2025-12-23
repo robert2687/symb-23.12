@@ -69,15 +69,29 @@ const EXAMPLE_PROMPTS = [
 ];
 
 const PREVIEW_REFRESH_MS = 250;
+const PREVIEW_NONCE = 'symbiotic-preview-nonce';
 
 const escapeHtml = (input: string) =>
   input.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 const extractMarkup = (content: string) => {
   const match = content.match(/return\s*\(([\s\S]*?)\)\s*;?/);
-  const body = match ? match[1] : content;
-  const sanitized = body.replace(/className=/g, 'class=').trim();
-  return sanitized || `<pre style="padding:16px;font-family:monospace">${escapeHtml(content)}</pre>`;
+  const normalize = (value: string) => {
+    const sanitized = value.replace(/className=/g, 'class=').trim();
+    return sanitized || `<pre style="padding:16px;font-family:monospace">${escapeHtml(content)}</pre>`;
+  };
+  if (match?.[1]) return normalize(match[1]);
+
+  const fragmentMatch = content.match(/return\s*<>\s*([\s\S]*?)\s*<\/>/);
+  if (fragmentMatch?.[1]) return normalize(fragmentMatch[1]);
+
+  const jsxStart = content.indexOf('<');
+  const jsxEnd = content.lastIndexOf('>');
+  if (jsxStart !== -1 && jsxEnd > jsxStart) {
+    return normalize(content.slice(jsxStart, jsxEnd + 1));
+  }
+
+  return `<pre style="padding:16px;font-family:monospace">${escapeHtml(content)}</pre>`;
 };
 
 const analyzeAppState = (content: string) => {
@@ -99,8 +113,8 @@ const buildPreviewDocument = (file: FileNode | null, snapshot: Record<string, st
     <head>
       <meta charset="UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src data: 'self'">
-      <style>
+      <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'nonce-${PREVIEW_NONCE}'; script-src 'self' 'nonce-${PREVIEW_NONCE}'; img-src data: 'self'">
+      <style nonce="${PREVIEW_NONCE}">
         body { margin: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0b1021; color: #e2e8f0; }
         .__symbiotic_state { position: fixed; bottom: 12px; right: 12px; background: rgba(15,23,42,0.85); color: #cbd5f5; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(148,163,184,0.4); font-size: 12px; max-width: 320px; }
         .__symbiotic_state pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
@@ -112,7 +126,7 @@ const buildPreviewDocument = (file: FileNode | null, snapshot: Record<string, st
         <strong>Persisted state</strong>
         <pre>${escapeHtml(stateJson)}</pre>
       </div>
-      <script>
+      <script nonce="${PREVIEW_NONCE}">
         try {
           const saved = localStorage.getItem('symbiotic_app_state_data');
           const fallback = ${stateJson};
@@ -120,6 +134,7 @@ const buildPreviewDocument = (file: FileNode | null, snapshot: Record<string, st
           localStorage.setItem('symbiotic_app_state_data', JSON.stringify(next));
           window.__SYMBIOTIC_STATE__ = next;
           window.addEventListener('message', (event) => {
+            if (event?.origin && event.origin !== window.location.origin) return;
             if (event?.data?.type === 'symbiotic_state_update') {
               localStorage.setItem('symbiotic_app_state_data', JSON.stringify(event.data.payload));
             }

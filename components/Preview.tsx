@@ -50,7 +50,7 @@ export function Preview({ file, theme, onToggleZen, zenMode, srcDoc, onRunPrevie
           <iframe
             key={lastRun ?? srcDoc}
             srcDoc={srcDoc}
-            sandbox="allow-same-origin allow-scripts"
+            sandbox="allow-scripts"
             title="Live preview"
             className="w-full h-full border-0"
           />
