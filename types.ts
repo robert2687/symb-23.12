@@ -1,5 +1,5 @@
 
-export type AgentRole = 'architect' | 'developer' | 'qa';
+export type AgentRole = 'architect' | 'developer' | 'qa' | 'designer' | 'critic';
 
 export type TargetAgent = 'team' | AgentRole;
 

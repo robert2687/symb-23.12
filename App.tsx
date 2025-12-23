@@ -74,6 +74,21 @@ const PREVIEW_NONCE = 'symbiotic-preview-nonce';
 const escapeHtml = (input: string) =>
   input.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+const sanitizeForPrompt = (value: string, maxLen = 6000) => {
+  if (!value) return '';
+  const cleaned = value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').slice(0, maxLen);
+  return cleaned;
+};
+
+const detectTemplateKey = (request: string): keyof typeof TEMPLATES | null => {
+  const lowerRequest = request.toLowerCase();
+  if (lowerRequest.includes('kanban')) return 'kanban';
+  if (lowerRequest.includes('calculator')) return 'calculator';
+  if (lowerRequest.includes('todo')) return 'todo';
+  if (lowerRequest.includes('login')) return 'login';
+  return null;
+};
+
 const extractMarkup = (content: string) => {
   const match = content.match(/return\s*\(([\s\S]*?)\)\s*;?/);
   const normalize = (value: string) => {
@@ -165,6 +180,43 @@ const mergeAppContent = (nodes: FileNode[], persisted?: { filename?: string; con
   });
 };
 
+const serializeProjectGraph = (nodes: FileNode[]): any[] => {
+  return nodes.map(node => ({
+    name: node.name,
+    type: node.type,
+    language: node.language,
+    children: node.children ? serializeProjectGraph(node.children) : undefined,
+  }));
+};
+
+const DEFAULT_DESIGN_LIBRARY = 'shadcn/ui';
+const DEFAULT_THEME_TOKENS = JSON.stringify({
+  colors: {
+    primary: '#6366f1',
+    accent: '#22d3ee',
+    background: '#0b1021',
+    surface: '#111827',
+    text: '#e2e8f0'
+  },
+  spacing: {
+    xs: 4,
+    sm: 8,
+    md: 12,
+    lg: 16,
+    xl: 24
+  },
+  typography: {
+    fontFamily: 'Inter, system-ui, sans-serif',
+    heading: { size: 24, weight: 700 },
+    body: { size: 14, weight: 500 }
+  },
+  radii: {
+    sm: 6,
+    md: 12,
+    lg: 16
+  }
+}, null, 2);
+
 const EmptyState = ({ onStart, onExampleClick, theme }: { onStart: () => void, onExampleClick: (text: string) => void, theme: Theme }) => (
   <div className={`h-full flex flex-col items-center justify-center text-center p-6 relative overflow-hidden ${theme === 'dark' ? 'bg-[#1e1e2e]' : 'bg-gray-50'}`}>
     <div className={`absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] ${theme === 'dark' ? 'from-indigo-900/20 via-[#1e1e2e] to-[#1e1e2e]' : 'from-indigo-200/40 via-gray-50 to-gray-50'}`} />
@@ -250,10 +302,16 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [selectedAgent, setSelectedAgent] = useState<TargetAgent>('team');
+  const [designTokens, setDesignTokens] = useState<string>(DEFAULT_THEME_TOKENS);
+  const [designLibrary, setDesignLibrary] = useState<string>(DEFAULT_DESIGN_LIBRARY);
+  const [designBrief, setDesignBrief] = useState<string>('');
+  const [pendingDeveloperContext, setPendingDeveloperContext] = useState<null | { userRequest: string; architectPlan: string; options: AgentOptions; design: { tokens: string; library: string; brief: string } }>(null);
+  const [designerPauseEnabled, setDesignerPauseEnabled] = useState(true);
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [livePreviewDoc, setLivePreviewDoc] = useState<string>(() => localStorage.getItem('symbiotic_preview_doc') || '');
+  const [previousPreviewDoc, setPreviousPreviewDoc] = useState<string | null>(null);
   const [lastPreviewRun, setLastPreviewRun] = useState<number | null>(() => {
     const saved = localStorage.getItem('symbiotic_preview_time');
     return saved ? Number(saved) : null;
@@ -266,6 +324,14 @@ export default function App() {
       return {};
     }
   });
+  const [projectGraph, setProjectGraph] = useState<string>(() => {
+    try {
+      return JSON.stringify(serializeProjectGraph(files), null, 2);
+    } catch {
+      return '[]';
+    }
+  });
+  const [lastUserRequest, setLastUserRequest] = useState('');
 
   // Auth & Settings State
   const [user, setUser] = useState<User | null>(() => {
@@ -328,6 +394,32 @@ export default function App() {
   }, [performSave]);
 
   useEffect(() => {
+    try {
+      setProjectGraph(JSON.stringify(serializeProjectGraph(files), null, 2));
+    } catch {
+      setProjectGraph('[]');
+    }
+  }, [files]);
+
+  useEffect(() => {
+    if (!designTokens) return;
+    setFiles(prev => {
+      let updated = false;
+      const next = prev.map(node => {
+        if (node.type === 'file' && node.name === 'theme.json') {
+          updated = true;
+          return { ...node, content: designTokens };
+        }
+        return node;
+      });
+      if (!updated) {
+        next.push({ name: 'theme.json', type: 'file', language: 'json', content: designTokens });
+      }
+      return next;
+    });
+  }, [designTokens]);
+
+  useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isResizingLeft.current) {
         const newWidth = Math.min(Math.max(e.clientX, 160), 480);
@@ -378,6 +470,7 @@ export default function App() {
     const snapshot = analyzeAppState(target.content || '');
     setAppStateSnapshot(snapshot);
     const doc = buildPreviewDocument(target, snapshot);
+    setPreviousPreviewDoc(livePreviewDoc || null);
     setLivePreviewDoc(doc);
     const now = Date.now();
     setLastPreviewRun(now);
@@ -407,6 +500,103 @@ export default function App() {
     setFiles(prev => prev.map(f => f.children ? { ...f, children: f.children.map(c => c.name === activeFile.name ? updatedFile : c) } : (f.name === activeFile.name ? updatedFile : f)));
   }, [activeFile, historyIndex]);
 
+  const runCriticStage = async (ai: GoogleGenAI, code: string, design: { tokens: string; library: string; brief: string }, architectPlan: string, userRequest: string) => {
+    const criticTaskId = generateId();
+    setTasks(prev => [...prev, { id: criticTaskId, title: "Critic Review", status: 'active', assignedTo: 'critic' }]);
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: `You are the critic. Compare the generated code with the plan and design tokens. 
+Design tokens: ${sanitizeForPrompt(design.tokens)}
+Library: ${sanitizeForPrompt(design.library)}
+Brief: ${sanitizeForPrompt(design.brief)}
+Plan: ${sanitizeForPrompt(architectPlan)}
+User request: ${sanitizeForPrompt(userRequest)}
+Current preview markup (after run): ${sanitizeForPrompt(livePreviewDoc || '')}
+Previous preview markup (before run): ${sanitizeForPrompt(previousPreviewDoc || 'none')}
+
+List visual defects, missing imports, or violations of the no-placeholder rule. Provide a concise summary and a small patch if needed.`,
+      config: {
+        systemInstruction: "Reviewer. If quality is low, send explicit fixes back to the coder. Keep feedback tight.",
+        tools: undefined
+      }
+    });
+    setMessages(prev => [...prev, { id: generateId(), sender: 'agent', agentRole: 'critic', text: response.text || 'Critic review complete.', timestamp: new Date() }]);
+    setTasks(prev => prev.map(t => t.id === criticTaskId ? { ...t, status: 'completed' } : t));
+  };
+
+  const runDeveloperStage = async (params: { userRequest: string; architectPlan: string; design: { tokens: string; library: string; brief: string }; options: AgentOptions; templateKey: keyof typeof TEMPLATES | null; ai: GoogleGenAI; }) => {
+    const { userRequest, architectPlan, design, options, templateKey, ai } = params;
+    const taskId = generateId();
+    setTasks(prev => [...prev, { id: taskId, title: "Implementation", status: 'active', assignedTo: 'developer' }]);
+    
+    let generatedCode = "";
+    let filename = "Component.tsx";
+    let explanation = "Built component.";
+
+    if (templateKey && !options.useThinking && !options.useSearch) {
+      const template = TEMPLATES[templateKey];
+      generatedCode = template.content;
+      filename = template.filename;
+    } else {
+      const response = await ai.models.generateContent({
+        model: options.useThinking ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview',
+        contents: `Build a React component using Tailwind and lucide-react. 
+Plan: ${architectPlan}. 
+Design library: ${sanitizeForPrompt(design.library)}. Theme tokens: ${sanitizeForPrompt(design.tokens)}.
+Brief: ${sanitizeForPrompt(design.brief)}
+Project graph: ${sanitizeForPrompt(projectGraph)}
+Request: ${userRequest}. 
+
+Rules:
+- CRITICAL: Do not use placeholder comments like "// ...rest of code". Emit full, working code.
+- Verify imports exist in the project graph; if missing, include the module in the same file.
+- Prefer atomic components (Logo/Nav/UserMenu) over one massive file. If too large, request to split but still provide working code.
+- Use the chosen component library primitives instead of raw CSS.
+- Use RAG: cite exact import syntax from documentation (shadcn/ui, Radix UI or Chakra UI).
+- If building a Kanban board, implement resizable columns with a drag handle and dnd-kit. Make DragOverlay visually distinct (shadow-2xl, scale-105, border-blue-500).
+- Persist design tokens by referencing theme.json when defining styles.
+Return ONLY valid JSON.`,
+        config: { 
+          responseMimeType: "application/json", 
+          systemInstruction: "Senior React Developer. You MUST return ONLY a single JSON object. Do not include any text before or after the JSON block. Format: { \"filename\": string, \"content\": string, \"explanation\": string }. CRITICAL: no placeholders or truncated code.",
+          thinkingConfig: options.useThinking ? { thinkingBudget: 32768 } : undefined,
+          tools: options.useSearch ? [] : undefined
+        }
+      });
+      
+      try {
+        const rawJson = cleanJson(response.text || "{}");
+        const json = JSON.parse(rawJson);
+        generatedCode = json.content || "// Error generating code";
+        filename = json.filename || "Component.tsx";
+        explanation = json.explanation || "Implementation complete.";
+      } catch (parseErr) {
+        console.error("Failed to parse developer response", parseErr, response.text);
+        generatedCode = `// Extraction Error: Failed to parse code output. Check Console.`;
+        explanation = "Developer agent encountered a JSON formatting error. I've attempted to recover, but the code block may be partial.";
+      }
+    }
+
+    const newFile: FileNode = { name: filename, type: 'file', language: 'typescript', content: generatedCode, isNew: true };
+    setFiles(prev => {
+      const next = [...prev];
+      const srcFolder = next.find(f => f.name === 'src' && f.type === 'folder');
+      if (srcFolder && srcFolder.children) {
+        srcFolder.children = srcFolder.children.filter(f => f.name !== filename);
+        srcFolder.children.push(newFile);
+      } else {
+        next.push(newFile);
+      }
+      return next;
+    });
+    setActiveFile(newFile);
+    setActiveTab('preview');
+    setMobileView('preview');
+    setMessages(prev => [...prev, { id: generateId(), sender: 'agent', agentRole: 'developer', text: explanation, timestamp: new Date() }]);
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'completed' } : t));
+    await runCriticStage(ai, generatedCode, design, architectPlan, userRequest);
+  };
+
   const handleSendMessage = async (target: TargetAgent, options: AgentOptions) => {
     if (!inputValue.trim() && !options.image) return;
     const apiKey = import.meta.env.RESOLVED_GEMINI_API_KEY;
@@ -428,27 +618,79 @@ export default function App() {
     setInputValue('');
     setIsProcessing(true);
 
-    const userRequest = userMsg.text;
-    const lowerRequest = userRequest.toLowerCase();
-
-    let templateKey: keyof typeof TEMPLATES | null = null;
-    if (lowerRequest.includes('kanban')) templateKey = 'kanban';
-    else if (lowerRequest.includes('calculator')) templateKey = 'calculator';
-    else if (lowerRequest.includes('todo')) templateKey = 'todo';
-    else if (lowerRequest.includes('login')) templateKey = 'login';
+    const userRequest = sanitizeForPrompt(userMsg.text);
+    setLastUserRequest(userRequest);
+    const templateKey = detectTemplateKey(userRequest);
 
     try {
+      let shouldPauseForEdit = false;
+      let designContext = { tokens: designTokens, library: designLibrary || DEFAULT_DESIGN_LIBRARY, brief: designBrief };
+      if (target === 'team' || target === 'designer') {
+        const taskId = generateId();
+        setTasks(prev => [...prev, { id: taskId, title: "Design System Draft", status: 'active', assignedTo: 'designer' }]);
+        const response = await ai.models.generateContent({
+          model: options.useThinking ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview',
+          contents: `You are the Visual Designer. Study the request and return a JSON with { "library": one of ["shadcn/ui","chakra-ui","radix-ui"], "tokens": { colors, spacing, typography, radii, shadows }, "brief": short guidance on layouts and states }. Do NOT guess raw CSS; pick from the libraries. If possible, base palette on existing preview markup. Request: ${userRequest}
+Existing preview doc (acts like a screenshot): ${sanitizeForPrompt(livePreviewDoc || 'not available', 4000)}`,
+          config: { 
+            responseMimeType: "application/json",
+            systemInstruction: "Visual Designer with VLM awareness. First emit a design token theme.json (colors, spacing, typography). Pre-seed with a component library (shadcn/ui default). Enforce atomic components and consistent scales. Never use placeholder text.",
+            thinkingConfig: options.useThinking ? { thinkingBudget: 32768 } : undefined,
+            tools: options.useSearch ? [] : undefined
+          }
+        });
+        try {
+          const rawJson = cleanJson(response.text || "{}");
+          const parsed = JSON.parse(rawJson);
+          const tokens = typeof parsed.tokens === 'string' ? parsed.tokens : JSON.stringify(parsed.tokens || {}, null, 2);
+          const library = parsed.library || DEFAULT_DESIGN_LIBRARY;
+          const brief = parsed.brief || 'Use consistent spacing and card system.';
+          designContext = { tokens, library, brief };
+          setDesignTokens(tokens);
+          setDesignLibrary(library);
+          setDesignBrief(brief);
+          const themeFile: FileNode = { name: 'theme.json', type: 'file', language: 'json', content: tokens };
+          setFiles(prev => {
+            const next = [...prev];
+            const existing = next.find(f => f.name === 'theme.json');
+            if (existing && existing.type === 'file') {
+              existing.content = tokens;
+            } else {
+              next.push(themeFile);
+            }
+            return next;
+          });
+          setMessages(prev => [...prev, { 
+            id: generateId(), 
+            sender: 'agent', 
+            agentRole: 'designer', 
+            text: `Library: ${library}\nBrief: ${brief}\nTokens saved to theme.json`, 
+            timestamp: new Date() 
+          }]);
+        } catch (err) {
+          console.error("Designer parse error", err);
+        }
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'completed' } : t));
+        setPendingDeveloperContext({ userRequest, architectPlan: '', options, design: designContext });
+        shouldPauseForEdit = designerPauseEnabled && target !== 'designer';
+      }
+
       let architectPlan = "";
       if (target === 'team' || target === 'architect') {
         const taskId = generateId();
         setTasks(prev => [...prev, { id: taskId, title: "Architecture Planning", status: 'active', assignedTo: 'architect' }]);
         const response = await ai.models.generateContent({
           model: options.useThinking ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview',
-          contents: userRequest,
+          contents: `User request: ${userRequest}
+Design brief: ${sanitizeForPrompt(designContext.brief)}
+Theme tokens: ${sanitizeForPrompt(designContext.tokens)}
+Project graph (existing files): ${sanitizeForPrompt(projectGraph)}
+
+Plan small, atomic components (Logo.tsx, NavLinks.tsx, UserMenu.tsx etc.) and ensure imports reference existing paths.`,
           config: { 
-            systemInstruction: "Senior Software Architect. Plan the UI structure using Tailwind and logical modules. Focus on performance, state management, and highly interactive layouts like resizable panels or dnd surfaces.", 
+            systemInstruction: "Senior Software Architect. Maintain a live JSON tree of files and only reference existing imports. Enforce component decomposition and describe how Coder will use the theme.json tokens and the selected component library. Avoid placeholders.",
             thinkingConfig: options.useThinking ? { thinkingBudget: 32768 } : undefined,
-            tools: options.useSearch ? [{ googleSearch: {} }] : undefined
+            tools: options.useSearch ? [] : undefined
           }
         });
         architectPlan = response.text || "";
@@ -466,69 +708,19 @@ export default function App() {
           groundingUrls: grounding.length > 0 ? grounding : undefined
         }]);
         setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'completed' } : t));
+        setPendingDeveloperContext(prev => prev ? { ...prev, architectPlan } : prev);
+      }
+
+      if (shouldPauseForEdit) {
+        setIsProcessing(false);
+        return;
       }
 
       if (target === 'team' || target === 'developer') {
-        const taskId = generateId();
-        setTasks(prev => [...prev, { id: taskId, title: "Implementation", status: 'active', assignedTo: 'developer' }]);
-        
-        let generatedCode = "";
-        let filename = "Component.tsx";
-        let explanation = "Built component.";
-
-        if (templateKey && !options.useThinking && !options.useSearch) {
-          const template = TEMPLATES[templateKey];
-          generatedCode = template.content;
-          filename = template.filename;
-        } else {
-          const response = await ai.models.generateContent({
-            model: options.useThinking ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview',
-            contents: `Build a React component using Tailwind and lucide-react. 
-            Plan: ${architectPlan}. 
-            Request: ${userRequest}. 
-            
-            IMPORTANT: If building a Kanban board, you MUST implement resizable columns using a drag handle and local state. Use dnd-kit for drag and drop.
-            Styling: The DragOverlay MUST be visually distinct (shadow-2xl, scale-105, border-blue-500). Use a dark 'slate' palette for modern IDE-like feel.
-            
-            Return ONLY valid JSON.`,
-            config: { 
-              responseMimeType: "application/json", 
-              systemInstruction: "Senior React Developer. You MUST return ONLY a single JSON object. Do not include any text before or after the JSON block. Format: { \"filename\": string, \"content\": string, \"explanation\": string }",
-              thinkingConfig: options.useThinking ? { thinkingBudget: 32768 } : undefined,
-              tools: options.useSearch ? [{ googleSearch: {} }] : undefined
-            }
-          });
-          
-          try {
-            const rawJson = cleanJson(response.text || "{}");
-            const json = JSON.parse(rawJson);
-            generatedCode = json.content || "// Error generating code";
-            filename = json.filename || "Component.tsx";
-            explanation = json.explanation || "Implementation complete.";
-          } catch (parseErr) {
-            console.error("Failed to parse developer response", parseErr, response.text);
-            generatedCode = `// Extraction Error: Failed to parse code output. Check Console.`;
-            explanation = "Developer agent encountered a JSON formatting error. I've attempted to recover, but the code block may be partial.";
-          }
-        }
-
-        const newFile: FileNode = { name: filename, type: 'file', language: 'typescript', content: generatedCode, isNew: true };
-        setFiles(prev => {
-          const next = [...prev];
-          const srcFolder = next.find(f => f.name === 'src' && f.type === 'folder');
-          if (srcFolder && srcFolder.children) {
-            srcFolder.children = srcFolder.children.filter(f => f.name !== filename);
-            srcFolder.children.push(newFile);
-          } else {
-            next.push(newFile);
-          }
-          return next;
-        });
-        setActiveFile(newFile);
-        setActiveTab('preview');
-        setMobileView('preview');
-        setMessages(prev => [...prev, { id: generateId(), sender: 'agent', agentRole: 'developer', text: explanation, timestamp: new Date() }]);
-        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'completed' } : t));
+        const designForDev = pendingDeveloperContext?.design || designContext;
+        const architectForDev = pendingDeveloperContext?.architectPlan || architectPlan;
+        await runDeveloperStage({ userRequest, architectPlan: architectForDev, design: designForDev, options, templateKey, ai });
+        setPendingDeveloperContext(null);
       }
     } catch (e) {
       console.error(e);
@@ -536,6 +728,29 @@ export default function App() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const resumeDeveloperFromDesign = async () => {
+    if (!pendingDeveloperContext) return;
+    const apiKey = import.meta.env.RESOLVED_GEMINI_API_KEY;
+    if (!apiKey) {
+      const keyList = GEMINI_KEY_ENV_ORDER.join(' or ');
+      setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: `Missing Gemini API key. Add ${keyList} to your .env.local file.`, timestamp: new Date() }]);
+      return;
+    }
+    setIsProcessing(true);
+    const ai = new GoogleGenAI({ apiKey });
+    const context = pendingDeveloperContext;
+    await runDeveloperStage({ 
+      userRequest: context.userRequest, 
+      architectPlan: context.architectPlan, 
+      design: { ...context.design, tokens: designTokens || context.design.tokens }, 
+      options: context.options, 
+      templateKey: detectTemplateKey(context.userRequest), 
+      ai 
+    });
+    setPendingDeveloperContext(null);
+    setIsProcessing(false);
   };
 
   const handleExampleClick = (text: string) => {
@@ -693,7 +908,7 @@ export default function App() {
               <div style={{ height: `calc(100% - ${bottomHeight}px)` }} className="relative">
                 {!activeFile ? <EmptyState onStart={() => setRightTab('chat')} onExampleClick={handleExampleClick} theme={theme} /> : 
                   activeTab === 'editor' ? <Editor file={activeFile} onChange={updateFileContent} theme={theme} onUndo={() => {}} onRedo={() => {}} canUndo={false} canRedo={false} onSave={performSave} saveStatus={saveStatus} /> :
-                  <Preview file={activeFile} theme={theme} onToggleZen={toggleZenMode} zenMode={zenMode} srcDoc={livePreviewDoc} onRunPreview={() => refreshLivePreview(activeFile)} lastRun={lastPreviewRun} stateSnapshot={appStateSnapshot} />}
+                  <Preview file={activeFile} theme={theme} onToggleZen={toggleZenMode} zenMode={zenMode} srcDoc={livePreviewDoc} beforeDoc={previousPreviewDoc} onRunPreview={() => refreshLivePreview(activeFile)} lastRun={lastPreviewRun} stateSnapshot={appStateSnapshot} />}
               </div>
               <div style={{ height: `${bottomHeight}px` }} className={`relative border-t ${theme === 'dark' ? 'border-white/10 bg-[#0b0b12]' : 'border-gray-200 bg-gray-50'} overflow-hidden`}>
                 <div 
@@ -714,7 +929,7 @@ export default function App() {
                     Run Preview
                   </button>
                 </div>
-                <div style={{ height: 'calc(100% - 42px)' }} className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 overflow-auto custom-scrollbar">
+                <div style={{ height: 'calc(100% - 42px)' }} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-3 overflow-auto custom-scrollbar">
                   <div className={`p-3 rounded-xl border ${theme === 'dark' ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-white'}`}>
                     <div className="text-[11px] uppercase font-bold text-indigo-400 mb-2">Recent Messages</div>
                     <div className="space-y-2 max-h-40 overflow-auto custom-scrollbar">
@@ -726,16 +941,53 @@ export default function App() {
                       {messages.length === 0 && <div className="text-xs text-gray-500">Agents are idle. Send a command from the AI Hub.</div>}
                     </div>
                   </div>
-                  <div className={`p-3 rounded-xl border ${theme === 'dark' ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-white'}`}>
-                    <div className="text-[11px] uppercase font-bold text-indigo-400 mb-2">Tasks</div>
-                    <div className="space-y-2 max-h-40 overflow-auto custom-scrollbar">
-                      {tasks.length === 0 && <div className="text-xs text-gray-500">No active tasks yet.</div>}
-                      {tasks.map(task => (
+                   <div className={`p-3 rounded-xl border ${theme === 'dark' ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-white'}`}>
+                     <div className="text-[11px] uppercase font-bold text-indigo-400 mb-2">Tasks</div>
+                     <div className="space-y-2 max-h-40 overflow-auto custom-scrollbar">
+                       {tasks.length === 0 && <div className="text-xs text-gray-500">No active tasks yet.</div>}
+                       {tasks.map(task => (
                         <div key={task.id} className="flex items-center justify-between text-xs">
                           <div className="font-semibold">{task.title}</div>
                           <span className="px-2 py-0.5 rounded-full border border-white/10">{task.status}</span>
                         </div>
-                      ))}
+                       ))}
+                     </div>
+                   </div>
+                  <div className={`p-3 rounded-xl border ${theme === 'dark' ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-white'}`}>
+                    <div className="text-[11px] uppercase font-bold text-indigo-400 mb-2">Design System &amp; Hand-off</div>
+                    <div className="space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold">Library</span>
+                        <span className="px-2 py-0.5 rounded-full border border-white/10">{designLibrary || DEFAULT_DESIGN_LIBRARY}</span>
+                      </div>
+                      <label className="text-[11px] font-semibold text-gray-400">theme.json</label>
+                      <textarea
+                        value={designTokens}
+                        onChange={(e) => setDesignTokens(e.target.value)}
+                        className={`w-full h-24 rounded-md border text-[11px] p-2 ${theme === 'dark' ? 'bg-[#0e0e11] border-white/10 text-gray-100' : 'bg-white border-gray-200 text-gray-900'}`}
+                      />
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDesignerPauseEnabled(prev => !prev)}
+                          className={`flex-1 px-3 py-2 rounded-md font-bold ${designerPauseEnabled ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40' : 'bg-emerald-600 text-white'}`}
+                        >
+                          {designerPauseEnabled ? 'Pause & Edit Enabled' : 'Auto-send to Coder'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!pendingDeveloperContext || isProcessing}
+                          onClick={resumeDeveloperFromDesign}
+                          className="flex-1 px-3 py-2 rounded-md font-bold bg-indigo-600 text-white disabled:opacity-50"
+                        >
+                          Send to Coder
+                        </button>
+                      </div>
+                      {pendingDeveloperContext && (
+                        <div className="text-[11px] text-gray-400">
+                          Awaiting hand-off for request: <span className="font-semibold text-indigo-300">{pendingDeveloperContext.userRequest}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -745,7 +997,7 @@ export default function App() {
           <div className="md:hidden h-full">
             {mobileView === 'files' && <div className="p-4 space-y-4"><h2 className="text-lg font-bold">Project Explorer</h2>{files.map(node => <FileTreeItem key={node.name} node={node} onSelect={(f) => { setActiveFile(f); setMobileView('editor'); }} activeFileName={activeFile?.name} theme={theme} />)}</div>}
             {mobileView === 'editor' && (activeFile ? <Editor file={activeFile} onChange={updateFileContent} theme={theme} onUndo={() => {}} onRedo={() => {}} canUndo={false} canRedo={false} onSave={performSave} saveStatus={saveStatus} /> : <EmptyState onStart={() => setMobileView('hub')} onExampleClick={handleExampleClick} theme={theme} />)}
-            {mobileView === 'preview' && <Preview file={activeFile} theme={theme} onToggleZen={toggleZenMode} zenMode={zenMode} srcDoc={livePreviewDoc} onRunPreview={() => refreshLivePreview(activeFile)} lastRun={lastPreviewRun} stateSnapshot={appStateSnapshot} />}
+             {mobileView === 'preview' && <Preview file={activeFile} theme={theme} onToggleZen={toggleZenMode} zenMode={zenMode} srcDoc={livePreviewDoc} beforeDoc={previousPreviewDoc} onRunPreview={() => refreshLivePreview(activeFile)} lastRun={lastPreviewRun} stateSnapshot={appStateSnapshot} />}
             {mobileView === 'hub' && (
               <div className="h-full flex flex-col">
                 <div className="flex h-10 border-b border-white/5">
@@ -753,9 +1005,9 @@ export default function App() {
                   <button onClick={() => setRightTab('tasks')} className={`flex-1 text-[10px] font-bold uppercase tracking-wider ${rightTab === 'tasks' ? 'text-indigo-400 bg-white/5' : 'text-gray-500'}`}>Tasks</button>
                   <button onClick={() => setRightTab('preview')} className={`flex-1 text-[10px] font-bold uppercase tracking-wider ${rightTab === 'preview' ? 'text-indigo-400 bg-white/5' : 'text-gray-500'}`}>Preview</button>
                 </div>
-                {rightTab === 'chat' && <ChatInterface messages={messages} inputValue={inputValue} setInputValue={setInputValue} onSendMessage={handleSendMessage} isProcessing={isProcessing} tasks={tasks} theme={theme} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} />}
-                {rightTab === 'tasks' && <TasksView tasks={tasks} theme={theme} />}
-                {rightTab === 'preview' && <Preview file={activeFile} theme={theme} onToggleZen={toggleZenMode} zenMode={zenMode} srcDoc={livePreviewDoc} onRunPreview={() => refreshLivePreview(activeFile)} lastRun={lastPreviewRun} stateSnapshot={appStateSnapshot} />}
+                 {rightTab === 'chat' && <ChatInterface messages={messages} inputValue={inputValue} setInputValue={setInputValue} onSendMessage={handleSendMessage} isProcessing={isProcessing} tasks={tasks} theme={theme} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} />}
+                 {rightTab === 'tasks' && <TasksView tasks={tasks} theme={theme} />}
+                 {rightTab === 'preview' && <Preview file={activeFile} theme={theme} onToggleZen={toggleZenMode} zenMode={zenMode} srcDoc={livePreviewDoc} beforeDoc={previousPreviewDoc} onRunPreview={() => refreshLivePreview(activeFile)} lastRun={lastPreviewRun} stateSnapshot={appStateSnapshot} />}
               </div>
             )}
           </div>
@@ -774,7 +1026,7 @@ export default function App() {
         <div className="flex-1 relative overflow-hidden">
           {rightTab === 'chat' && <ChatInterface messages={messages} inputValue={inputValue} setInputValue={setInputValue} onSendMessage={handleSendMessage} isProcessing={isProcessing} tasks={tasks} theme={theme} selectedAgent={selectedAgent} setSelectedAgent={setSelectedAgent} />}
           {rightTab === 'tasks' && <TasksView tasks={tasks} theme={theme} />}
-          {rightTab === 'preview' && <Preview file={activeFile} theme={theme} onToggleZen={toggleZenMode} zenMode={zenMode} srcDoc={livePreviewDoc} onRunPreview={() => refreshLivePreview(activeFile)} lastRun={lastPreviewRun} stateSnapshot={appStateSnapshot} />}
+          {rightTab === 'preview' && <Preview file={activeFile} theme={theme} onToggleZen={toggleZenMode} zenMode={zenMode} srcDoc={livePreviewDoc} beforeDoc={previousPreviewDoc} onRunPreview={() => refreshLivePreview(activeFile)} lastRun={lastPreviewRun} stateSnapshot={appStateSnapshot} />}
         </div>
       </div>
 

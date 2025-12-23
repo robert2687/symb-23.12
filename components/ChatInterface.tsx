@@ -30,6 +30,7 @@ export function ChatInterface({
     'Generate responsive layout with sidebar and top nav',
     'Refine code for accessibility and keyboard navigation',
     'Add localStorage persistence to the current app',
+    'Draft a design system with tokens and shadcn/ui components',
   ];
 
   const taskSummary = useMemo(() => tasks.filter((t) => t.status === 'active').length, [tasks]);
@@ -62,8 +63,10 @@ export function ChatInterface({
         >
           <option value="team">Team</option>
           <option value="architect">Architect</option>
+          <option value="designer">Visual Designer</option>
           <option value="developer">Developer</option>
           <option value="qa">QA</option>
+          <option value="critic">Critic</option>
         </select>
       </div>
 
