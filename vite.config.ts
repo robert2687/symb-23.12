@@ -1,12 +1,28 @@
+import { createHash } from 'crypto';
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { GEMINI_KEY_ENV_ORDER } from './envKeys';
 
+const BLOCKED_GEMINI_KEY_HASHES = new Set([
+  'c83922dee0374346dc5f5f7a16de494ad136470a05658dcb72a4bc4b279503fb', // leaked key, do not use
+]);
+
+const sanitizeGeminiKey = (rawKey?: string) => {
+  if (!rawKey) return '';
+  const hashed = createHash('sha256').update(rawKey).digest('hex');
+  if (BLOCKED_GEMINI_KEY_HASHES.has(hashed)) {
+    console.warn('Gemini API key is blocked because it was exposed. Please generate a new key.');
+    return '';
+  }
+  return rawKey.trim();
+};
+
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     // Resolve the key once using the configured precedence (VITE_GEMINI_API_KEY, GEMINI_API_KEY, API_KEY).
-    const geminiKey = GEMINI_KEY_ENV_ORDER.map(key => env[key]?.trim()).find(value => value) || '';
+    const resolvedKey = GEMINI_KEY_ENV_ORDER.map(key => env[key]).find(value => value);
+    const geminiKey = sanitizeGeminiKey(resolvedKey);
     return {
        server: {
          port: 3000,
