@@ -100,7 +100,12 @@ type GeminiErrorPayload = { error?: GeminiInnerError } | GeminiInnerError;
 const unwrapGeminiError = (error: Partial<GeminiErrorPayload>): GeminiInnerError | null => {
   const nestedCandidate = 'error' in error && error.error ? error.error : error;
   if (typeof nestedCandidate !== 'object' || nestedCandidate === null) return null;
-  return nestedCandidate as GeminiInnerError;
+  const candidate = nestedCandidate as Record<string, unknown>;
+  const code = typeof candidate.code === 'number' ? candidate.code : undefined;
+  const message = typeof candidate.message === 'string' ? candidate.message : undefined;
+  const status = typeof candidate.status === 'string' ? candidate.status : undefined;
+  if (code === undefined && message === undefined && status === undefined) return null;
+  return { code, message, status };
 };
 
 const formatAgentError = (error: unknown) => {
@@ -115,12 +120,13 @@ const formatAgentError = (error: unknown) => {
     const code = nested.code;
     const status = nested.status;
     const normalized = message ? message.toLowerCase() : '';
-    // Known Gemini responses for leaked keys include "reported as leaked"; update if SDK messaging changes.
+    // Known Gemini responses for leaked keys include PERMISSION_DENIED 403 with "Your API key was reported as leaked".
+    // Update the patterns below if SDK messaging changes.
     const hasLeakedMessage = normalized.includes('reported as leaked');
     const mentionsApiKey = normalized.includes('api key');
-    const isPermissionDeniedStatus = code === 403 && status === 'PERMISSION_DENIED';
-    const isLeakedKey = hasLeakedMessage || (isPermissionDeniedStatus && mentionsApiKey);
-    const isPermissionDenied = isPermissionDeniedStatus || code === 403 || status === 'PERMISSION_DENIED';
+    const hasPermissionDenied = status === 'PERMISSION_DENIED' || code === 403;
+    const isLeakedKey = hasLeakedMessage || (hasPermissionDenied && mentionsApiKey);
+    const isPermissionDenied = hasPermissionDenied;
     if (isLeakedKey) {
       return 'Gemini API key was reported as leaked. Generate a new API key in Google AI Studio and update your .env.local file.';
     }
