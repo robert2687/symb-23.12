@@ -28,6 +28,7 @@ import { ChatInterface } from './components/ChatInterface';
 import { TasksView } from './components/TasksView';
 import { AuthModal } from './components/AuthModal';
 import { SettingsModal } from './components/SettingsModal';
+import { GEMINI_KEY_ENV_ORDER } from './envKeys';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
@@ -239,11 +240,10 @@ export default function App() {
 
   const handleSendMessage = async (target: TargetAgent, options: AgentOptions) => {
     if (!inputValue.trim() && !options.image) return;
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY 
-      || import.meta.env.GEMINI_API_KEY 
-      || (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY || process.env?.API_KEY : undefined);
+    const apiKey = import.meta.env.RESOLVED_GEMINI_API_KEY;
     if (!apiKey) {
-      setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: "Missing Gemini API key. Add VITE_GEMINI_API_KEY to your .env.local file.", timestamp: new Date() }]);
+      const keyList = GEMINI_KEY_ENV_ORDER.join(' or ');
+      setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: `Missing Gemini API key. Add ${keyList} to your .env.local file.`, timestamp: new Date() }]);
       setIsProcessing(false);
       return;
     }

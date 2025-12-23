@@ -1,0 +1,1 @@
+export const GEMINI_KEY_ENV_ORDER = ['VITE_GEMINI_API_KEY', 'GEMINI_API_KEY', 'API_KEY'] as const;
