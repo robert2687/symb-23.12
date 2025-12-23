@@ -70,6 +70,8 @@ const EXAMPLE_PROMPTS = [
 
 const PREVIEW_REFRESH_MS = 250;
 const PREVIEW_NONCE = 'symbiotic-preview-nonce';
+const FAST_MODEL = 'models/gemini-1.5-flash-latest';
+const REASONING_MODEL = 'models/gemini-1.5-pro-latest';
 
 const escapeHtml = (input: string) =>
   input.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -687,6 +689,8 @@ Theme tokens: ${sanitizeForPrompt(designContext.tokens)}
 Project graph (existing files): ${sanitizeForPrompt(projectGraph)}
 
 Plan small, atomic components (Logo.tsx, NavLinks.tsx, UserMenu.tsx etc.) and ensure imports reference existing paths.`,
+          model: options.useThinking ? REASONING_MODEL : FAST_MODEL,
+          contents: userRequest,
           config: { 
             systemInstruction: "Senior Software Architect. Maintain a live JSON tree of files and only reference existing imports. Enforce component decomposition and describe how Coder will use the theme.json tokens and the selected component library. Avoid placeholders.",
             thinkingConfig: options.useThinking ? { thinkingBudget: 32768 } : undefined,
@@ -715,6 +719,49 @@ Plan small, atomic components (Logo.tsx, NavLinks.tsx, UserMenu.tsx etc.) and en
         setIsProcessing(false);
         return;
       }
+      if (target === 'team' || target === 'developer') {
+        const taskId = generateId();
+        setTasks(prev => [...prev, { id: taskId, title: "Implementation", status: 'active', assignedTo: 'developer' }]);
+        
+        let generatedCode = "";
+        let filename = "Component.tsx";
+        let explanation = "Built component.";
+
+        if (templateKey && !options.useThinking && !options.useSearch) {
+          const template = TEMPLATES[templateKey];
+          generatedCode = template.content;
+          filename = template.filename;
+        } else {
+          const response = await ai.models.generateContent({
+            model: options.useThinking ? REASONING_MODEL : FAST_MODEL,
+            contents: `Build a React component using Tailwind and lucide-react. 
+            Plan: ${architectPlan}. 
+            Request: ${userRequest}. 
+            
+            IMPORTANT: If building a Kanban board, you MUST implement resizable columns using a drag handle and local state. Use dnd-kit for drag and drop.
+            Styling: The DragOverlay MUST be visually distinct (shadow-2xl, scale-105, border-blue-500). Use a dark 'slate' palette for modern IDE-like feel.
+            
+            Return ONLY valid JSON.`,
+            config: { 
+              responseMimeType: "application/json", 
+              systemInstruction: "Senior React Developer. You MUST return ONLY a single JSON object. Do not include any text before or after the JSON block. Format: { \"filename\": string, \"content\": string, \"explanation\": string }",
+              thinkingConfig: options.useThinking ? { thinkingBudget: 32768 } : undefined,
+              tools: options.useSearch ? [{ googleSearch: {} }] : undefined
+            }
+          });
+          
+          try {
+            const rawJson = cleanJson(response.text || "{}");
+            const json = JSON.parse(rawJson);
+            generatedCode = json.content || "// Error generating code";
+            filename = json.filename || "Component.tsx";
+            explanation = json.explanation || "Implementation complete.";
+          } catch (parseErr) {
+            console.error("Failed to parse developer response", parseErr, response.text);
+            generatedCode = `// Extraction Error: Failed to parse code output. Check Console.`;
+            explanation = "Developer agent encountered a JSON formatting error. I've attempted to recover, but the code block may be partial.";
+          }
+        }
 
       if (target === 'team' || target === 'developer') {
         const designForDev = pendingDeveloperContext?.design || designContext;
@@ -724,7 +771,9 @@ Plan small, atomic components (Logo.tsx, NavLinks.tsx, UserMenu.tsx etc.) and en
       }
     } catch (e) {
       console.error(e);
-      setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: "Error connecting to agents. Mission aborted.", timestamp: new Date() }]);
+      const detail = e instanceof Error ? e.message : String(e);
+      const errorMessage = detail ? `Error connecting to agents: ${detail}` : "Error connecting to agents. Mission aborted.";
+      setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: `${errorMessage} Please verify your Gemini API key and network access.`, timestamp: new Date() }]);
     } finally {
       setIsProcessing(false);
     }
