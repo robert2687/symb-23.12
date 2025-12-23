@@ -5,9 +5,8 @@ import { GEMINI_KEY_ENV_ORDER } from './envKeys';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
+    // Resolve the key once using the configured precedence (VITE_GEMINI_API_KEY, GEMINI_API_KEY, API_KEY).
     const geminiKey = GEMINI_KEY_ENV_ORDER.map(key => env[key]?.trim()).find(value => value) || '';
-    // Prefer GEMINI_API_KEY but fall back to API_KEY (or any resolved key) for compatibility across deployment setups.
-    const geminiApiKey = env.GEMINI_API_KEY?.trim() || env.API_KEY?.trim() || geminiKey;
     return {
       server: {
         port: 3000,
@@ -17,9 +16,9 @@ export default defineConfig(({ mode }) => {
       define: {
         'import.meta.env.RESOLVED_GEMINI_API_KEY': JSON.stringify(geminiKey),
         'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(geminiKey),
-        'import.meta.env.GEMINI_API_KEY': JSON.stringify(geminiApiKey),
-        'process.env.API_KEY': JSON.stringify(geminiApiKey),
-        'process.env.GEMINI_API_KEY': JSON.stringify(geminiApiKey)
+        'import.meta.env.GEMINI_API_KEY': JSON.stringify(geminiKey),
+        'process.env.API_KEY': JSON.stringify(geminiKey),
+        'process.env.GEMINI_API_KEY': JSON.stringify(geminiKey)
       },
       resolve: {
         alias: {
