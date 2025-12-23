@@ -70,6 +70,8 @@ const EXAMPLE_PROMPTS = [
 
 const PREVIEW_REFRESH_MS = 250;
 const PREVIEW_NONCE = 'symbiotic-preview-nonce';
+const FAST_MODEL = 'models/gemini-1.5-flash-latest';
+const REASONING_MODEL = 'models/gemini-1.5-pro-latest';
 
 const escapeHtml = (input: string) =>
   input.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -443,7 +445,7 @@ export default function App() {
         const taskId = generateId();
         setTasks(prev => [...prev, { id: taskId, title: "Architecture Planning", status: 'active', assignedTo: 'architect' }]);
         const response = await ai.models.generateContent({
-          model: options.useThinking ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview',
+          model: options.useThinking ? REASONING_MODEL : FAST_MODEL,
           contents: userRequest,
           config: { 
             systemInstruction: "Senior Software Architect. Plan the UI structure using Tailwind and logical modules. Focus on performance, state management, and highly interactive layouts like resizable panels or dnd surfaces.", 
@@ -482,7 +484,7 @@ export default function App() {
           filename = template.filename;
         } else {
           const response = await ai.models.generateContent({
-            model: options.useThinking ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview',
+            model: options.useThinking ? REASONING_MODEL : FAST_MODEL,
             contents: `Build a React component using Tailwind and lucide-react. 
             Plan: ${architectPlan}. 
             Request: ${userRequest}. 
@@ -532,7 +534,9 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
-      setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: "Error connecting to agents. Mission aborted.", timestamp: new Date() }]);
+      const detail = e instanceof Error ? e.message : String(e);
+      const fallback = detail ? `Error connecting to agents: ${detail}` : "Error connecting to agents. Mission aborted.";
+      setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: `${fallback} Please verify your Gemini API key and network access.`, timestamp: new Date() }]);
     } finally {
       setIsProcessing(false);
     }
