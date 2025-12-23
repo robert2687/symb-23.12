@@ -91,16 +91,20 @@ const detectTemplateKey = (request: string): keyof typeof TEMPLATES | null => {
   return null;
 };
 
+type GeminiErrorPayload = { error?: { code?: number; message?: string; status?: string }; code?: number; message?: string; status?: string };
+
 const formatAgentError = (error: unknown) => {
   if (!error) return '';
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
   if (typeof error === 'object') {
-    const nested = (error as any).error || error;
+    const structured = error as GeminiErrorPayload;
+    const nested = structured.error || structured;
     const message = typeof nested?.message === 'string' ? nested.message : '';
     const code = nested?.code;
     const status = nested?.status;
-    if (message.toLowerCase().includes('reported as leaked')) {
+    const normalized = message ? message.toLowerCase() : '';
+    if (normalized.includes('reported as leaked') || (code === 403 && status === 'PERMISSION_DENIED' && normalized.includes('api key'))) {
       return 'Gemini API key was reported as leaked. Generate a new API key in Google AI Studio and update your .env.local file.';
     }
     if (code === 403 || status === 'PERMISSION_DENIED') {
