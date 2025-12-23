@@ -535,8 +535,8 @@ export default function App() {
     } catch (e) {
       console.error(e);
       const detail = e instanceof Error ? e.message : String(e);
-      const fallback = detail ? `Error connecting to agents: ${detail}` : "Error connecting to agents. Mission aborted.";
-      setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: `${fallback} Please verify your Gemini API key and network access.`, timestamp: new Date() }]);
+      const errorMessage = detail ? `Error connecting to agents: ${detail}` : "Error connecting to agents. Mission aborted.";
+      setMessages(prev => [...prev, { id: generateId(), sender: 'system', text: `${errorMessage} Please verify your Gemini API key and network access.`, timestamp: new Date() }]);
     } finally {
       setIsProcessing(false);
     }
