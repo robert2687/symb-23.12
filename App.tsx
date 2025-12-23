@@ -93,8 +93,15 @@ const detectTemplateKey = (request: string): keyof typeof TEMPLATES | null => {
 
 /** Minimal shape of Gemini error payloads returned by the SDK. */
 type GeminiInnerError = { code?: number; message?: string; status?: string };
+
 /** Gemini errors may nest the payload under an `error` key or surface fields at the top level. */
 type GeminiErrorPayload = { error?: GeminiInnerError } | GeminiInnerError;
+
+const unwrapGeminiError = (error: Partial<GeminiErrorPayload>): GeminiInnerError | null => {
+  const nestedCandidate = 'error' in error && error.error ? error.error : error;
+  if (typeof nestedCandidate !== 'object' || nestedCandidate === null) return null;
+  return nestedCandidate as GeminiInnerError;
+};
 
 const formatAgentError = (error: unknown) => {
   if (!error) return '';
@@ -102,13 +109,13 @@ const formatAgentError = (error: unknown) => {
   if (typeof error === 'string') return error;
   if (typeof error === 'object' && error !== null) {
     const structured = error as Partial<GeminiErrorPayload>;
-    const nestedCandidate = 'error' in structured && structured.error ? structured.error : structured;
-    if (typeof nestedCandidate !== 'object' || nestedCandidate === null) return '';
-    const nested = nestedCandidate as GeminiInnerError;
+    const nested = unwrapGeminiError(structured);
+    if (!nested) return '';
     const message = typeof nested.message === 'string' ? nested.message : '';
     const code = nested.code;
     const status = nested.status;
     const normalized = message ? message.toLowerCase() : '';
+    // Known Gemini responses for leaked keys include "reported as leaked"; update if SDK messaging changes.
     const hasLeakedMessage = normalized.includes('reported as leaked');
     const mentionsApiKey = normalized.includes('api key');
     const isPermissionDeniedStatus = code === 403 && status === 'PERMISSION_DENIED';
