@@ -19,11 +19,18 @@ const sanitizeGeminiKey = (rawKey?: string) => {
   return sanitized;
 };
 
+const resolveGeminiKey = (env: Record<string, string | undefined>) => {
+  for (const key of GEMINI_KEY_ENV_ORDER) {
+    const candidate = sanitizeGeminiKey(env[key]);
+    if (candidate) return candidate;
+  }
+  return '';
+};
+
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     // Resolve the key once using the configured precedence (VITE_GEMINI_API_KEY, GEMINI_API_KEY, API_KEY).
-    const resolvedKey = GEMINI_KEY_ENV_ORDER.map(key => env[key]).find(value => value);
-    const geminiKey = sanitizeGeminiKey(resolvedKey);
+    const geminiKey = resolveGeminiKey(env);
     return {
        server: {
          port: 3000,
