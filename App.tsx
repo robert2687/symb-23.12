@@ -762,6 +762,7 @@ Plan small, atomic components (Logo.tsx, NavLinks.tsx, UserMenu.tsx etc.) and en
             explanation = "Developer agent encountered a JSON formatting error. I've attempted to recover, but the code block may be partial.";
           }
         }
+      }
 
       if (target === 'team' || target === 'developer') {
         const designForDev = pendingDeveloperContext?.design || designContext;
